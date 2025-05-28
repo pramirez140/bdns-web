@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - BDNS_API_BASE_URL=https://www.infosubvenciones.es/bdnstrans
+      - DATABASE_URL=postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: bdns_db
+      POSTGRES_USER: bdns_user
+      POSTGRES_PASSWORD: bdns_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bdns_user -d bdns_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Development service (optional)
+  web-dev:
+    build:
+      context: .
+      target: development
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+      - BDNS_API_BASE_URL=https://www.infosubvenciones.es/bdnstrans
+      - DATABASE_URL=postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run dev
+    profiles:
+      - dev
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - cache
+
+volumes:
+  postgres_data:
+  redis_data:
