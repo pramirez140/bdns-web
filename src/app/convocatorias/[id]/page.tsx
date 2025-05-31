@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchPersistence } from '@/hooks/useSearchPersistence';
 
 interface Grant {
   identificador: string;
@@ -24,6 +25,24 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
   const [grant, setGrant] = useState<Grant | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { searchState, restoreScrollPosition, saveResultItemPosition } = useSearchPersistence();
+
+  // Enhanced back navigation with scroll restoration
+  const handleBackToSearch = () => {
+    const searchQuery = searchParams.toString();
+    const returnUrl = searchQuery ? `/?${searchQuery}` : '/';
+    
+    // Save the current item position for future reference
+    saveResultItemPosition(params.id, window.pageYOffset);
+    
+    // Navigate back
+    router.push(returnUrl);
+    
+    // Restore scroll position after navigation
+    setTimeout(() => {
+      restoreScrollPosition();
+    }, 100);
+  };
 
   // Build return URL with preserved search state
   const getReturnUrl = () => {
@@ -32,25 +51,25 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
   };
 
   useEffect(() => {
-    fetchGrant();
-  }, []);
-
-  const fetchGrant = async () => {
-    try {
-      const response = await fetch(`/api/convocatoria/${params.id}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setGrant(data.data);
-      } else {
-        setError('Grant not found');
+    const fetchGrant = async () => {
+      try {
+        const response = await fetch(`/api/convocatoria/${params.id}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          setGrant(data.data);
+        } else {
+          setError('Grant not found');
+        }
+      } catch (err) {
+        setError('Error loading grant');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError('Error loading grant');
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+
+    fetchGrant();
+  }, [params.id]);
 
   const formatCurrency = (amount: number) => {
     if (amount === 0) return 'See official page';
@@ -96,9 +115,12 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
           <p className="text-gray-600 mb-6">
             {error || `Grant with ID ${params.id} could not be found.`}
           </p>
-          <Link href={getReturnUrl()} className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
-            Back to Search
-          </Link>
+          <button 
+            onClick={handleBackToSearch}
+            className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
+          >
+            Back to Search Results
+          </button>
         </div>
       </div>
     );
@@ -110,12 +132,12 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Navigation */}
-        <Link 
-          href={getReturnUrl()}
-          className="inline-flex items-center text-blue-600 hover:text-blue-800 mb-6"
+        <button 
+          onClick={handleBackToSearch}
+          className="inline-flex items-center text-blue-600 hover:text-blue-800 mb-6 bg-transparent border-0 cursor-pointer"
         >
-          ← Back to Search
-        </Link>
+          ← Back to Search Results
+        </button>
 
         {/* Header Card */}
         <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
@@ -247,12 +269,12 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
                 >
                   View Official Page
                 </a>
-                <Link
-                  href={getReturnUrl()}
+                <button
+                  onClick={handleBackToSearch}
                   className="block w-full text-center border border-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-50 transition-colors"
                 >
-                  Search More Grants
-                </Link>
+                  Back to Search Results
+                </button>
               </div>
             </div>
           </div>

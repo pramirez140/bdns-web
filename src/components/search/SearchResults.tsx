@@ -12,6 +12,7 @@ import {
   BuildingOfficeIcon
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
+import { useSearchPersistence } from '@/hooks/useSearchPersistence';
 
 interface SearchResultsProps {
   results: SearchResult<ConvocatoriaData>;
@@ -30,6 +31,14 @@ export default function SearchResults({
   currentSort 
 }: SearchResultsProps) {
   const { data, total, page, pageSize, totalPages } = results;
+  const { saveScrollPosition, saveResultItemPosition } = useSearchPersistence();
+
+  // Save scroll position when clicking on a grant
+  const handleGrantClick = (grantId: string) => {
+    const currentPosition = window.pageYOffset || document.documentElement.scrollTop;
+    saveScrollPosition();
+    saveResultItemPosition(grantId, currentPosition);
+  };
 
   const formatCurrency = (amount: number) => {
     if (amount === 0) {
@@ -221,6 +230,7 @@ export default function SearchResults({
                 <Link 
                   href={`/convocatorias/${convocatoria.identificador}`}
                   className="block hover:text-bdns-blue"
+                  onClick={() => handleGrantClick(convocatoria.identificador)}
                 >
                   <h3 className="text-lg font-medium text-gray-900 mb-2 line-clamp-2">
                     {convocatoria.titulo}
@@ -324,6 +334,7 @@ export default function SearchResults({
                     <Link
                       href={`/convocatorias/${convocatoria.identificador}`}
                       className="text-sm text-bdns-blue hover:underline"
+                      onClick={() => handleGrantClick(convocatoria.identificador)}
                     >
                       Ver detalles
                     </Link>

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import SearchForm from '@/components/search/SearchForm';
 import SearchResults from '@/components/search/SearchResults';
 import FilterPanel from '@/components/filters/FilterPanel';
 import { SyncManager } from '@/components/sync/SyncManager';
 import { SearchFilters, SearchParams, SearchResult, ConvocatoriaData } from '@/types/bdns';
 import { useTabState, useSearchState } from '@/hooks/useUrlState';
+import { useEnhancedSearchState } from '@/hooks/useSearchPersistence';
 
 // Helper function to call our API endpoint
 const callSearchAPI = async (filters: SearchFilters, params: SearchParams): Promise<SearchResult<ConvocatoriaData>> => {
@@ -38,7 +39,7 @@ const callSearchAPI = async (filters: SearchFilters, params: SearchParams): Prom
   return data.data;
 };
 
-export default function HomePage() {
+function HomePage() {
   // URL state management
   const { activeTab, setActiveTab } = useTabState();
   const { 
@@ -49,6 +50,14 @@ export default function HomePage() {
     clearSearch 
   } = useSearchState();
   
+  // Enhanced search persistence
+  const { 
+    searchState, 
+    restoreScrollPosition, 
+    saveScrollPosition,
+    hasValidCache 
+  } = useEnhancedSearchState();
+  
   // Component state
   const [searchResults, setSearchResults] = useState<SearchResult<ConvocatoriaData> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +65,7 @@ export default function HomePage() {
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
 
   // Perform search with current URL state
-  const performSearch = async (filters?: SearchFilters, params?: SearchParams) => {
+  const performSearch = useCallback(async (filters?: SearchFilters, params?: SearchParams) => {
     const searchFilters = filters || currentFilters;
     const searchParams = params || currentParams;
     
@@ -81,21 +90,31 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentFilters, currentParams]);
 
-  // Load initial state from URL on mount
+  // Load initial state from URL on mount with cached results
   useEffect(() => {
     if (!hasInitialLoad) {
       setHasInitialLoad(true);
       
-      // If URL has search parameters, perform search
-      if (currentFilters.query || currentFilters.organoConvocante || 
+      // Check if we have valid cached results
+      if (hasValidCache() && searchState.results) {
+        console.log('🚀 Restoring cached search results');
+        setSearchResults(searchState.results);
+        
+        // Restore scroll position after a short delay
+        setTimeout(() => {
+          restoreScrollPosition();
+        }, 100);
+      }
+      // If URL has search parameters but no cache, perform search
+      else if (currentFilters.query || currentFilters.organoConvocante || 
           currentFilters.importeMinimo || currentFilters.importeMaximo ||
           currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria) {
         performSearch();
       }
     }
-  }, [hasInitialLoad, currentFilters, currentParams]);
+  }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState.results, restoreScrollPosition]);
 
   // Handle new search from form
   const handleSearch = async (query?: string, filters?: SearchFilters) => {
@@ -333,5 +352,20 @@ export default function HomePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Cargando...</p>
+        </div>
+      </div>
+    }>
+      <HomePage />
+    </Suspense>
   );
 }
