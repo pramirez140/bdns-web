@@ -14,7 +14,8 @@ export async function GET(request: NextRequest) {
     const sortOrder = searchParams.get('sortOrder') as 'asc' | 'desc' || undefined;
     
     // Extract filters
-    const organoConvocante = searchParams.get('organoConvocante') || undefined;
+    const organoConvocante = searchParams.get('organoConvocante') || searchParams.get('organo');
+    const organoConvocanteArray = organoConvocante ? (organoConvocante.includes(',') ? organoConvocante.split(',').filter(Boolean) : [organoConvocante]) : undefined;
     const importeMinimo = searchParams.get('importeMinimo') ? parseFloat(searchParams.get('importeMinimo')!) : undefined;
     const importeMaximo = searchParams.get('importeMaximo') ? parseFloat(searchParams.get('importeMaximo')!) : undefined;
     const fechaDesde = searchParams.get('fechaDesde') ? new Date(searchParams.get('fechaDesde')!) : undefined;
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
     // Build filters object
     const filtros: SearchFilters = {
       query,
-      organoConvocante,
+      organoConvocante: organoConvocanteArray,
       importeMinimo,
       importeMaximo,
       fechaConvocatoria: (fechaDesde || fechaHasta) ? {

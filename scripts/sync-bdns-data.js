@@ -138,11 +138,13 @@ class BDNSDataSynchronizer {
 
   async getTotalPages(dateRange) {
     try {
-      const response = await this.makeAPIRequest(0, 1, dateRange);
+      // Use same page-size as actual sync to get accurate page count
+      const response = await this.makeAPIRequest(0, BATCH_SIZE, dateRange);
       
       if (Array.isArray(response) && response.length > 0) {
         this.totalPages = response[0]['total-pages'] || 1;
         this.totalRecords = this.totalPages * BATCH_SIZE; // Approximate
+        console.log(`📊 API reports ${this.totalPages} total pages to process (${BATCH_SIZE} records per page)`);
       } else {
         throw new Error('Invalid API response format');
       }

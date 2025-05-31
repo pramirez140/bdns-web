@@ -52,6 +52,27 @@ const SEARCH_RESULTS_KEY = 'bdns_search_results';
 const SCROLL_POSITION_KEY = 'bdns_scroll_position';
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
+// Helper function to restore Date objects from serialized data
+const restoreDatesInFilters = (filters: any): SearchFilters => {
+  if (!filters) return {};
+  
+  const restored = { ...filters };
+  
+  // Restore fecha convocatoria dates
+  if (restored.fechaConvocatoria) {
+    if (restored.fechaConvocatoria.desde && typeof restored.fechaConvocatoria.desde === 'string') {
+      const date = new Date(restored.fechaConvocatoria.desde);
+      restored.fechaConvocatoria.desde = isNaN(date.getTime()) ? undefined : date;
+    }
+    if (restored.fechaConvocatoria.hasta && typeof restored.fechaConvocatoria.hasta === 'string') {
+      const date = new Date(restored.fechaConvocatoria.hasta);
+      restored.fechaConvocatoria.hasta = isNaN(date.getTime()) ? undefined : date;
+    }
+  }
+  
+  return restored;
+};
+
 const defaultSearchState: SearchState = {
   filters: {},
   params: { page: 1, limit: 20, sortBy: 'fechaPublicacion', sortOrder: 'desc' },
@@ -79,7 +100,7 @@ export function useSearchPersistence(): UseSearchPersistenceReturn {
           const parsedCookieState = JSON.parse(cookieState);
           restoredState = {
             ...restoredState,
-            filters: parsedCookieState.filters || {},
+            filters: restoreDatesInFilters(parsedCookieState.filters) || {},
             params: { ...restoredState.params, ...parsedCookieState.params },
             lastSearchTimestamp: parsedCookieState.lastSearchTimestamp || 0,
             resultItemsScrollPositions: parsedCookieState.resultItemsScrollPositions || {},
@@ -244,11 +265,23 @@ export function useEnhancedSearchState() {
       const searchParams = new URLSearchParams();
       
       if (filters.query) searchParams.append('q', filters.query);
-      if (filters.organoConvocante) searchParams.append('organo', filters.organoConvocante);
+      if (filters.organoConvocante) {
+        if (Array.isArray(filters.organoConvocante)) {
+          searchParams.append('organo', filters.organoConvocante.join(','));
+        } else {
+          searchParams.append('organo', filters.organoConvocante);
+        }
+      }
       if (filters.importeMinimo) searchParams.append('importe_min', filters.importeMinimo.toString());
       if (filters.importeMaximo) searchParams.append('importe_max', filters.importeMaximo.toString());
-      if (filters.fechaDesde) searchParams.append('fecha_desde', filters.fechaDesde);
-      if (filters.fechaHasta) searchParams.append('fecha_hasta', filters.fechaHasta);
+      if (filters.fechaConvocatoria?.desde) {
+        const fecha = filters.fechaConvocatoria.desde;
+        searchParams.append('fecha_desde', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+      }
+      if (filters.fechaConvocatoria?.hasta) {
+        const fecha = filters.fechaConvocatoria.hasta;
+        searchParams.append('fecha_hasta', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+      }
       if (filters.estadoConvocatoria) searchParams.append('estado', filters.estadoConvocatoria);
       
       searchParams.append('page', params.page?.toString() || '1');

@@ -48,7 +48,7 @@ export interface ConvocatoriaData {
   organoConvocante: string;
   fechaPublicacion: Date;
   fechaApertura: Date;
-  fechaCierre: Date;
+  fechaCierre: Date | null;
   importeTotal: number;
   importeMaximoBeneficiario: number;
   objetivos: string;
@@ -74,7 +74,7 @@ export interface ConcesionData {
 export interface SearchFilters {
   // Campos principales según documentación BDNS
   query?: string;                   // Búsqueda de texto libre
-  organoConvocante?: string;        // Ministerio, CCAA, etc.
+  organoConvocante?: string[];      // Ministerio, CCAA, etc. (array para selección múltiple)
   tipoEntidad?: string;             // Estatal, Autonómica, Local
   materiaSubvencion?: string;       // I+D+i, Empleo, etc.
   beneficiario?: string;            // Nombre del beneficiario

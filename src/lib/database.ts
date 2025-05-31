@@ -5,7 +5,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://bdns_user:bdns_password@localhost:5432/bdns_db',
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 30000,
 });
 
 // Database connection wrapper
@@ -27,6 +27,8 @@ export class Database {
   async query(text: string, params?: any[]): Promise<any> {
     const client = await this.pool.connect();
     try {
+      // Set query timeout to 30 seconds for complex searches
+      await client.query('SET statement_timeout = 30000');
       const result = await client.query(text, params);
       return result;
     } catch (error) {
@@ -142,7 +144,7 @@ export class BDNSDatabase {
   // Search convocatorias using the database function
   async searchConvocatorias(
     searchTerm?: string,
-    organoFilter?: string,
+    organoFilter?: string | string[],
     fechaDesde?: Date,
     fechaHasta?: Date,
     importeMin?: number,
@@ -151,13 +153,21 @@ export class BDNSDatabase {
     limit: number = 20,
     offset: number = 0
   ): Promise<any[]> {
+    
+    // If organoFilter is an array, we need to use a different approach
+    if (Array.isArray(organoFilter) && organoFilter.length > 0) {
+      return this.searchConvocatoriasWithMultipleOrganos(
+        searchTerm, organoFilter, fechaDesde, fechaHasta, importeMin, importeMax, soloAbiertas, limit, offset
+      );
+    }
+    
     const query = `
       SELECT * FROM search_convocatorias($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `;
     
     const values = [
       searchTerm || null,
-      organoFilter || null,
+      typeof organoFilter === 'string' ? organoFilter : null,
       fechaDesde || null,
       fechaHasta || null,
       importeMin || null,
@@ -171,10 +181,158 @@ export class BDNSDatabase {
     return result.rows;
   }
 
+  // Expand normalized organism names to their actual variations in the database
+  async expandOrganismNames(normalizedNames: string[]): Promise<string[]> {
+    if (!normalizedNames.length) return [];
+    
+    const query = `
+      WITH normalized_organismos AS (
+        SELECT 
+          desc_organo as nombre_completo,
+          CASE 
+            -- Normalize main government ministries
+            WHEN desc_organo ILIKE '%MINISTERIO DE TRABAJO Y ECONOMÍA SOCIAL%' THEN 'ESTADO - MINISTERIO DE TRABAJO Y ECONOMÍA SOCIAL'
+            WHEN desc_organo ILIKE '%MINISTERIO DE HACIENDA%' THEN 'ESTADO - MINISTERIO DE HACIENDA'
+            WHEN desc_organo ILIKE '%MINISTERIO DE ECONOMÍA%' THEN 'ESTADO - MINISTERIO DE ECONOMÍA, COMERCIO Y EMPRESA'
+            WHEN desc_organo ILIKE '%MINISTERIO DE CIENCIA%' THEN 'ESTADO - MINISTERIO DE CIENCIA E INNOVACIÓN'
+            WHEN desc_organo ILIKE '%MINISTERIO DE INDUSTRIA%' THEN 'ESTADO - MINISTERIO DE INDUSTRIA, COMERCIO Y TURISMO'
+            WHEN desc_organo ILIKE '%MINISTERIO DE AGRICULTURA%' THEN 'ESTADO - MINISTERIO DE AGRICULTURA, PESCA Y ALIMENTACIÓN'
+            WHEN desc_organo ILIKE '%MINISTERIO DE CULTURA%' THEN 'ESTADO - MINISTERIO DE CULTURA Y DEPORTE'
+            WHEN desc_organo ILIKE '%MINISTERIO DE SANIDAD%' THEN 'ESTADO - MINISTERIO DE SANIDAD'
+            WHEN desc_organo ILIKE '%MINISTERIO DE EDUCACIÓN%' THEN 'ESTADO - MINISTERIO DE EDUCACIÓN Y FORMACIÓN PROFESIONAL'
+            -- Normalize autonomous communities (keep the main entity)
+            WHEN desc_organo ILIKE 'ANDALUCÍA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'CATALUNYA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'COMUNIDAD DE MADRID -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'COMUNITAT VALENCIANA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'GALICIA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'CASTILLA Y LEÓN -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'PAÍS VASCO -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'CANARIAS -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'CASTILLA-LA MANCHA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'MURCIA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'ARAGÓN -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'EXTREMADURA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'ILLES BALEARS -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'LA RIOJA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'CANTABRIA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'NAVARRA -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            WHEN desc_organo ILIKE 'ASTURIAS -%' THEN REGEXP_REPLACE(desc_organo, ' - .*', '')
+            -- Keep others as is for now
+            ELSE desc_organo
+          END as nombre_normalizado
+        FROM convocatorias 
+        WHERE desc_organo IS NOT NULL 
+          AND desc_organo != ''
+          AND desc_organo != 'NULL'
+      )
+      SELECT DISTINCT nombre_completo
+      FROM normalized_organismos 
+      WHERE nombre_normalizado = ANY($1)
+    `;
+    
+    const result = await this.db.query(query, [normalizedNames]);
+    return result.rows.map((row: any) => row.nombre_completo);
+  }
+
+  // Search convocatorias with multiple organismos
+  async searchConvocatoriasWithMultipleOrganos(
+    searchTerm?: string,
+    organoFilters?: string[],
+    fechaDesde?: Date,
+    fechaHasta?: Date,
+    importeMin?: number,
+    importeMax?: number,
+    soloAbiertas?: boolean,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<any[]> {
+    // First, expand normalized organism names to their variations
+    const expandedOrganoFilters = await this.expandOrganismNames(organoFilters || []);
+    let conditions = [];
+    let values: any[] = [];
+    let paramIndex = 1;
+
+    // Text search
+    if (searchTerm && searchTerm.trim()) {
+      conditions.push(`(
+        to_tsvector('spanish', titulo) @@ to_tsquery('spanish', $${paramIndex}) OR
+        similarity(titulo, $${paramIndex + 1}) > 0.3 OR
+        titulo ILIKE $${paramIndex + 2} OR
+        desc_organo ILIKE $${paramIndex + 2}
+      )`);
+      const cleanTerm = searchTerm.trim().replace(/[^\w\s]/g, '').replace(/\s+/g, ' & ');
+      values.push(cleanTerm, searchTerm, `%${searchTerm}%`);
+      paramIndex += 3;
+    }
+
+    // Multiple organism filter (using expanded variations or simple terms)
+    if (organoFilters && organoFilters.length > 0) {
+      if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
+        const organoConditions = expandedOrganoFilters.map((_, index) => `desc_organo = $${paramIndex + index}`);
+        conditions.push(`(${organoConditions.join(' OR ')})`);
+        expandedOrganoFilters.forEach(organo => values.push(organo));
+        paramIndex += expandedOrganoFilters.length;
+      } else {
+        // For simple array terms, use ILIKE
+        const organoConditions = organoFilters.map((_, index) => `desc_organo ILIKE $${paramIndex + index}`);
+        conditions.push(`(${organoConditions.join(' OR ')})`);
+        organoFilters.forEach(organo => values.push(`%${organo}%`));
+        paramIndex += organoFilters.length;
+      }
+    }
+
+    // Date filters
+    if (fechaDesde) {
+      conditions.push(`fecha_registro >= $${paramIndex}`);
+      values.push(fechaDesde);
+      paramIndex++;
+    }
+    if (fechaHasta) {
+      conditions.push(`fecha_registro <= $${paramIndex}`);
+      values.push(fechaHasta);
+      paramIndex++;
+    }
+
+    // Amount filters
+    if (importeMin !== undefined && importeMin !== null) {
+      conditions.push(`importe_total >= $${paramIndex}`);
+      values.push(importeMin);
+      paramIndex++;
+    }
+    if (importeMax !== undefined && importeMax !== null) {
+      conditions.push(`importe_total <= $${paramIndex}`);
+      values.push(importeMax);
+      paramIndex++;
+    }
+
+    // Open/closed filter
+    if (soloAbiertas) {
+      conditions.push('abierto = true');
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    
+    const query = `
+      SELECT 
+        id, codigo_bdns, titulo, desc_organo, fecha_registro, 
+        inicio_solicitud, fin_solicitud, abierto, importe_total
+      FROM convocatorias 
+      ${whereClause}
+      ORDER BY fecha_registro DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+    
+    values.push(limit, offset);
+    
+    const result = await this.db.query(query, values);
+    return result.rows;
+  }
+
   // Search convocatorias with custom sorting
   async searchConvocatoriasWithSort(
     searchTerm?: string,
-    organoFilter?: string,
+    organoFilter?: string | string[],
     fechaDesde?: Date,
     fechaHasta?: Date,
     importeMin?: number,
@@ -184,6 +342,20 @@ export class BDNSDatabase {
     offset: number = 0,
     sortClause: string = 'ORDER BY fecha_registro DESC'
   ): Promise<any[]> {
+    // Expand organism names if it's an array of normalized names
+    let expandedOrganoFilters: string[] | undefined;
+    if (Array.isArray(organoFilter) && organoFilter.length > 0) {
+      // Only expand if it looks like normalized organism names
+      const hasNormalizedNames = organoFilter.some(org => 
+        org.startsWith('ESTADO - MINISTERIO') || 
+        org.match(/^[A-Z\s]+ - [A-Z]/) // Pattern like "ANDALUCÍA - XXXX"
+      );
+      
+      if (hasNormalizedNames) {
+        expandedOrganoFilters = await this.expandOrganismNames(organoFilter);
+      }
+    }
+    
     // Build the main query with filtering and sorting
     let query = `
       SELECT 
@@ -213,9 +385,25 @@ export class BDNSDatabase {
     }
 
     if (organoFilter) {
-      query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
-      values.push(organoFilter);
-      paramIndex++;
+      if (Array.isArray(organoFilter) && organoFilter.length > 0) {
+        if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
+          // Use exact matches for expanded organisms
+          const organoConditions = expandedOrganoFilters.map((_, index) => `c.desc_organo = $${paramIndex + index}`);
+          query += ` AND (${organoConditions.join(' OR ')})`;
+          expandedOrganoFilters.forEach(organo => values.push(organo));
+          paramIndex += expandedOrganoFilters.length;
+        } else {
+          // For simple array terms, use ILIKE
+          const organoConditions = organoFilter.map((_, index) => `c.desc_organo ILIKE $${paramIndex + index}`);
+          query += ` AND (${organoConditions.join(' OR ')})`;
+          organoFilter.forEach(organo => values.push(`%${organo}%`));
+          paramIndex += organoFilter.length;
+        }
+      } else if (typeof organoFilter === 'string') {
+        query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
+        values.push(organoFilter);
+        paramIndex++;
+      }
     }
 
     if (fechaDesde) {
@@ -258,13 +446,26 @@ export class BDNSDatabase {
   // Get total count for search
   async getSearchCount(
     searchTerm?: string,
-    organoFilter?: string,
+    organoFilter?: string | string[],
     fechaDesde?: Date,
     fechaHasta?: Date,
     importeMin?: number,
     importeMax?: number,
     soloAbiertas?: boolean
   ): Promise<number> {
+    // Expand organism names if it's an array of normalized names
+    let expandedOrganoFilters: string[] | undefined;
+    if (Array.isArray(organoFilter) && organoFilter.length > 0) {
+      // Only expand if it looks like normalized organism names
+      const hasNormalizedNames = organoFilter.some(org => 
+        org.startsWith('ESTADO - MINISTERIO') || 
+        org.match(/^[A-Z\s]+ - [A-Z]/) // Pattern like "ANDALUCÍA - XXXX"
+      );
+      
+      if (hasNormalizedNames) {
+        expandedOrganoFilters = await this.expandOrganismNames(organoFilter);
+      }
+    }
     let query = `
       SELECT COUNT(*) as total
       FROM convocatorias c
@@ -285,9 +486,25 @@ export class BDNSDatabase {
     }
 
     if (organoFilter) {
-      query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
-      values.push(organoFilter);
-      paramIndex++;
+      if (Array.isArray(organoFilter) && organoFilter.length > 0) {
+        if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
+          // Use exact matches for expanded organisms
+          const organoConditions = expandedOrganoFilters.map((_, index) => `c.desc_organo = $${paramIndex + index}`);
+          query += ` AND (${organoConditions.join(' OR ')})`;
+          expandedOrganoFilters.forEach(organo => values.push(organo));
+          paramIndex += expandedOrganoFilters.length;
+        } else {
+          // For simple array terms, use ILIKE
+          const organoConditions = organoFilter.map((_, index) => `c.desc_organo ILIKE $${paramIndex + index}`);
+          query += ` AND (${organoConditions.join(' OR ')})`;
+          organoFilter.forEach(organo => values.push(`%${organo}%`));
+          paramIndex += organoFilter.length;
+        }
+      } else if (typeof organoFilter === 'string') {
+        query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
+        values.push(organoFilter);
+        paramIndex++;
+      }
     }
 
     if (fechaDesde) {

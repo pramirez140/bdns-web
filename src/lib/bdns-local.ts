@@ -184,7 +184,7 @@ export class BDNSLocalClient {
       organoConvocante: row.desc_organo || '',
       fechaPublicacion: row.fecha_registro || new Date(),
       fechaApertura: row.inicio_solicitud || row.fecha_registro || new Date(),
-      fechaCierre: row.fin_solicitud || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      fechaCierre: row.fin_solicitud || null,
       importeTotal: parseFloat(row.importe_total || '0'),
       importeMaximoBeneficiario: 0, // Not stored in our schema yet
       objetivos: finalidad.descripcion || row.titulo || 'Consultar convocatoria para objetivos específicos',

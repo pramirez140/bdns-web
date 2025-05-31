@@ -22,7 +22,13 @@ const callSearchAPI = async (filters: SearchFilters, params: SearchParams): Prom
   
   // Add filters
   if (filters.query) searchParams.append('query', filters.query);
-  if (filters.organoConvocante) searchParams.append('organoConvocante', filters.organoConvocante);
+  if (filters.organoConvocante) {
+    if (Array.isArray(filters.organoConvocante)) {
+      searchParams.append('organoConvocante', filters.organoConvocante.join(','));
+    } else {
+      searchParams.append('organoConvocante', filters.organoConvocante);
+    }
+  }
   if (filters.importeMinimo) searchParams.append('importeMinimo', filters.importeMinimo.toString());
   if (filters.importeMaximo) searchParams.append('importeMaximo', filters.importeMaximo.toString());
   
@@ -212,7 +218,8 @@ function HomePage() {
 
   // Handle filter changes
   const handleFilterChange = (filters: SearchFilters) => {
-    const newFilters = { ...currentFilters, ...filters };
+    // If filters is empty object (clear filters), use it directly
+    const newFilters = Object.keys(filters).length === 0 ? {} : { ...currentFilters, ...filters };
     const newParams = { ...currentParams, page: 1 }; // Reset to first page
     
     // Update URL state

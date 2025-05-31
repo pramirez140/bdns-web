@@ -362,7 +362,7 @@ export class BDNSRealApiClient {
       
       fechaApertura: this.parseSpanishDate(item['inicio-solicitud']) || this.parseSpanishDate(item['fecha-registro']) || new Date(),
       
-      fechaCierre: this.parseSpanishDate(item['fin-solicitud']) || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      fechaCierre: this.parseSpanishDate(item['fin-solicitud']) || null,
       
       importeTotal: this.extractImporteFromFinanciacion(item.financiacion) || 0,
       

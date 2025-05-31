@@ -257,12 +257,25 @@ export default function SearchResults({
                   <div className="flex items-center">
                     <CalendarIcon className="h-4 w-4 mr-1" />
                     <span>
-                      {convocatoria.fechaApertura && convocatoria.fechaCierre && 
-                       new Date(convocatoria.fechaApertura).getTime() !== new Date(convocatoria.fechaPublicacion).getTime() ? (
-                        <>Apertura: {formatDate(convocatoria.fechaApertura)} • Cierre: {formatDate(convocatoria.fechaCierre)}</>
-                      ) : (
-                        <>Registro BDNS: {formatDate(convocatoria.fechaPublicacion)}</>
-                      )}
+                      {(() => {
+                        const pubDate = new Date(convocatoria.fechaPublicacion);
+                        const closeDate = convocatoria.fechaCierre ? new Date(convocatoria.fechaCierre) : null;
+                        const openDate = convocatoria.fechaApertura ? new Date(convocatoria.fechaApertura) : null;
+                        
+                        // Detect artificial close dates (more than 1 year after publication for old grants)
+                        const isArtificialCloseDate = closeDate && 
+                          (closeDate.getFullYear() - pubDate.getFullYear() > 1) &&
+                          pubDate.getFullYear() < 2020;
+                        
+                        if (openDate && closeDate && !isArtificialCloseDate && 
+                            openDate.getTime() !== pubDate.getTime()) {
+                          return <>Apertura: {formatDate(openDate)} • Cierre: {formatDate(closeDate)}</>;
+                        } else if (closeDate && !isArtificialCloseDate) {
+                          return <>Publicado: {formatDate(pubDate)} • Cierre: {formatDate(closeDate)}</>;
+                        } else {
+                          return <>Publicado: {formatDate(pubDate)}</>;
+                        }
+                      })()}
                     </span>
                   </div>
                   <div className="flex items-center">

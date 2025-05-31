@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SearchFilters, DateRange } from '@/types/bdns';
 import { 
   FunnelIcon, 
@@ -8,7 +8,10 @@ import {
   CalendarIcon,
   CurrencyEuroIcon,
   BuildingOfficeIcon,
-  MapPinIcon
+  MapPinIcon,
+  MagnifyingGlassIcon,
+  ChevronDownIcon,
+  XCircleIcon
 } from '@heroicons/react/24/outline';
 
 interface FilterPanelProps {
@@ -19,6 +22,13 @@ interface FilterPanelProps {
 
 export default function FilterPanel({ filters, onFilterChange, loading = false }: FilterPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [organismos, setOrganismos] = useState<Array<{nombre: string, totalConvocatorias: number}>>([]);
+  const [loadingOrganismos, setLoadingOrganismos] = useState(false);
+  
+  // Estados para el selector múltiple de organismos
+  const [organismosSearch, setOrganismosSearch] = useState('');
+  const [showOrganismosDropdown, setShowOrganismosDropdown] = useState(false);
+  const organismosDropdownRef = useRef<HTMLDivElement>(null);
 
   const handleFilterUpdate = (key: keyof SearchFilters, value: any) => {
     const updatedFilters = { ...filters, [key]: value };
@@ -26,27 +36,87 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
   };
 
   const clearFilters = () => {
+    // Clear organism search state
+    setOrganismosSearch('');
+    setShowOrganismosDropdown(false);
+    
+    // Clear all filters
     onFilterChange({});
   };
 
-  const hasActiveFilters = Object.keys(filters).some(key => 
-    filters[key as keyof SearchFilters] !== undefined && 
-    filters[key as keyof SearchFilters] !== ''
+  const hasActiveFilters = Object.keys(filters).some(key => {
+    const value = filters[key as keyof SearchFilters];
+    if (value === undefined || value === null || value === '') return false;
+    
+    // Handle arrays (like organoConvocante)
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    
+    // Handle objects (like fechaConvocatoria)
+    if (typeof value === 'object' && value !== null) {
+      return Object.values(value).some(v => v !== undefined && v !== null && v !== '');
+    }
+    
+    return true;
+  });
+
+  // Load organismos from API
+  useEffect(() => {
+    async function fetchOrganismos() {
+      setLoadingOrganismos(true);
+      try {
+        const response = await fetch('/api/organismos');
+        const data = await response.json();
+        if (data.success) {
+          setOrganismos(data.data);
+        } else {
+          console.error('Failed to fetch organismos:', data.error);
+        }
+      } catch (error) {
+        console.error('Error fetching organismos:', error);
+      } finally {
+        setLoadingOrganismos(false);
+      }
+    }
+    
+    fetchOrganismos();
+  }, []);
+
+  // Cerrar dropdown cuando se hace click fuera
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (organismosDropdownRef.current && !organismosDropdownRef.current.contains(event.target as Node)) {
+        setShowOrganismosDropdown(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Handlers para selector múltiple de organismos
+  const selectedOrganismos = filters.organoConvocante || [];
+  
+  const filteredOrganismos = organismos.filter(org =>
+    org.nombre.toLowerCase().includes(organismosSearch.toLowerCase())
   );
 
-  // Predefined options (in a real app, these would come from the API)
-  const organismos = [
-    'Ministerio de Ciencia e Innovación',
-    'Ministerio de Trabajo y Economía Social',
-    'Ministerio de Industria, Comercio y Turismo',
-    'Ministerio de Agricultura, Pesca y Alimentación',
-    'Ministerio de Cultura y Deporte',
-    'Ministerio de Educación y Formación Profesional',
-    'Junta de Andalucía',
-    'Generalitat de Catalunya',
-    'Comunidad de Madrid',
-    'Generalitat Valenciana'
-  ];
+  const handleOrganismoToggle = (organismo: string) => {
+    const currentSelected = filters.organoConvocante || [];
+    const newSelected = currentSelected.includes(organismo)
+      ? currentSelected.filter(o => o !== organismo)
+      : [...currentSelected, organismo];
+    
+    handleFilterUpdate('organoConvocante', newSelected.length > 0 ? newSelected : undefined);
+  };
+
+  const removeOrganismo = (organismo: string) => {
+    const newSelected = (filters.organoConvocante || []).filter(o => o !== organismo);
+    handleFilterUpdate('organoConvocante', newSelected.length > 0 ? newSelected : undefined);
+  };
 
   const tiposEntidad = [
     'ESTATAL',
@@ -132,25 +202,96 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
       {/* Filters Content */}
       <div className={`${isExpanded ? 'block' : 'hidden'} lg:block`}>
         <div className="p-4 space-y-6">
-          {/* Organismo Convocante */}
+          {/* Organismo Convocante - Selector Múltiple */}
           <div>
             <label className="form-label flex items-center">
               <BuildingOfficeIcon className="h-4 w-4 mr-1" />
               Organismo Convocante
+              {selectedOrganismos.length > 0 && (
+                <span className="ml-2 px-2 py-1 bg-bdns-blue text-white text-xs rounded-full">
+                  {selectedOrganismos.length}
+                </span>
+              )}
             </label>
-            <select
-              value={filters.organoConvocante || ''}
-              onChange={(e) => handleFilterUpdate('organoConvocante', e.target.value || undefined)}
-              className="form-select"
-              disabled={loading}
-            >
-              <option value="">Todos los organismos</option>
-              {organismos.map((organismo) => (
-                <option key={organismo} value={organismo}>
-                  {organismo}
-                </option>
-              ))}
-            </select>
+            
+            {/* Organismos seleccionados */}
+            {selectedOrganismos.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedOrganismos.map((organismo) => (
+                  <span
+                    key={organismo}
+                    className="inline-flex items-center px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full"
+                  >
+                    {organismo.length > 50 ? `${organismo.substring(0, 50)}...` : organismo}
+                    <button
+                      onClick={() => removeOrganismo(organismo)}
+                      className="ml-2 text-blue-600 hover:text-blue-800"
+                    >
+                      <XCircleIcon className="h-4 w-4" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Buscador con dropdown */}
+            <div className="relative" ref={organismosDropdownRef}>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder={loadingOrganismos ? 'Cargando organismos...' : 'Buscar organismos...'}
+                  value={organismosSearch}
+                  onChange={(e) => setOrganismosSearch(e.target.value)}
+                  onFocus={() => setShowOrganismosDropdown(true)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-bdns-blue focus:border-transparent"
+                  disabled={loading || loadingOrganismos}
+                />
+                <MagnifyingGlassIcon className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <button
+                  onClick={() => setShowOrganismosDropdown(!showOrganismosDropdown)}
+                  className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                >
+                  <ChevronDownIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Dropdown con resultados */}
+              {showOrganismosDropdown && !loadingOrganismos && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                  {filteredOrganismos.length > 0 ? (
+                    filteredOrganismos.slice(0, 20).map((organismo) => (
+                      <div
+                        key={organismo.nombre}
+                        className={`px-3 py-2 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                          selectedOrganismos.includes(organismo.nombre) ? 'bg-blue-50' : ''
+                        }`}
+                        onClick={() => handleOrganismoToggle(organismo.nombre)}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-900 truncate">
+                              {organismo.nombre}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {organismo.totalConvocatorias} convocatorias
+                            </div>
+                          </div>
+                          {selectedOrganismos.includes(organismo.nombre) && (
+                            <div className="ml-2 w-4 h-4 bg-bdns-blue text-white rounded-full flex items-center justify-center text-xs">
+                              ✓
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-sm text-gray-500">
+                      {organismosSearch ? 'No se encontraron organismos' : 'Escribe para buscar organismos'}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Tipo de Entidad */}
@@ -258,37 +399,224 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               <CalendarIcon className="h-4 w-4 mr-1" />
               Fechas de Convocatoria
             </label>
-            <div className="space-y-2">
-              <input
-                type="date"
-                placeholder="Fecha desde"
-                value={filters.fechaConvocatoria?.desde ? 
-                  filters.fechaConvocatoria.desde.toISOString().split('T')[0] : ''}
-                onChange={(e) => {
-                  const fechaConvocatoria = filters.fechaConvocatoria || {};
-                  handleFilterUpdate('fechaConvocatoria', {
-                    ...fechaConvocatoria,
-                    desde: e.target.value ? new Date(e.target.value) : undefined
-                  });
-                }}
-                className="form-input"
-                disabled={loading}
-              />
-              <input
-                type="date"
-                placeholder="Fecha hasta"
-                value={filters.fechaConvocatoria?.hasta ? 
-                  filters.fechaConvocatoria.hasta.toISOString().split('T')[0] : ''}
-                onChange={(e) => {
-                  const fechaConvocatoria = filters.fechaConvocatoria || {};
-                  handleFilterUpdate('fechaConvocatoria', {
-                    ...fechaConvocatoria,
-                    hasta: e.target.value ? new Date(e.target.value) : undefined
-                  });
-                }}
-                className="form-input"
-                disabled={loading}
-              />
+            <div className="space-y-3">
+              {/* Date Range Presets */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const startOfWeek = new Date(now);
+                    const day = now.getDay();
+                    const diff = now.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+                    startOfWeek.setDate(diff);
+                    startOfWeek.setHours(0, 0, 0, 0);
+                    handleFilterUpdate('fechaConvocatoria', {
+                      desde: startOfWeek,
+                      hasta: now
+                    });
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                  disabled={loading}
+                >
+                  Esta semana
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    handleFilterUpdate('fechaConvocatoria', {
+                      desde: startOfMonth,
+                      hasta: now
+                    });
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                  disabled={loading}
+                >
+                  Este mes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const startOfYear = new Date(now.getFullYear(), 0, 1);
+                    handleFilterUpdate('fechaConvocatoria', {
+                      desde: startOfYear,
+                      hasta: now
+                    });
+                  }}
+                  className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                  disabled={loading}
+                >
+                  Este año
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                    handleFilterUpdate('fechaConvocatoria', {
+                      desde: lastMonth,
+                      hasta: endOfLastMonth
+                    });
+                  }}
+                  className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+                  disabled={loading}
+                >
+                  Mes pasado
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const lastYear = new Date(now.getFullYear() - 1, 0, 1);
+                    const endOfLastYear = new Date(now.getFullYear() - 1, 11, 31);
+                    handleFilterUpdate('fechaConvocatoria', {
+                      desde: lastYear,
+                      hasta: endOfLastYear
+                    });
+                  }}
+                  className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+                  disabled={loading}
+                >
+                  Año pasado
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleFilterUpdate('fechaConvocatoria', undefined);
+                  }}
+                  className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+                  disabled={loading}
+                >
+                  Limpiar
+                </button>
+              </div>
+              
+              {/* Month/Year Selectors */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Desde</label>
+                  <div className="grid grid-cols-2 gap-1">
+                    <select
+                      value={filters.fechaConvocatoria?.desde?.getMonth() ?? ''}
+                      onChange={(e) => {
+                        const fechaConvocatoria = filters.fechaConvocatoria || {};
+                        const currentYear = fechaConvocatoria.desde?.getFullYear() ?? new Date().getFullYear();
+                        const newDate = e.target.value !== '' ? new Date(currentYear, parseInt(e.target.value), 1) : undefined;
+                        handleFilterUpdate('fechaConvocatoria', {
+                          ...fechaConvocatoria,
+                          desde: newDate
+                        });
+                      }}
+                      className="text-xs form-input py-1"
+                      disabled={loading}
+                    >
+                      <option value="">Mes</option>
+                      <option value="0">Ene</option>
+                      <option value="1">Feb</option>
+                      <option value="2">Mar</option>
+                      <option value="3">Abr</option>
+                      <option value="4">May</option>
+                      <option value="5">Jun</option>
+                      <option value="6">Jul</option>
+                      <option value="7">Ago</option>
+                      <option value="8">Sep</option>
+                      <option value="9">Oct</option>
+                      <option value="10">Nov</option>
+                      <option value="11">Dic</option>
+                    </select>
+                    <select
+                      value={filters.fechaConvocatoria?.desde?.getFullYear() ?? ''}
+                      onChange={(e) => {
+                        const fechaConvocatoria = filters.fechaConvocatoria || {};
+                        const currentMonth = fechaConvocatoria.desde?.getMonth() ?? 0;
+                        const newDate = e.target.value !== '' ? new Date(parseInt(e.target.value), currentMonth, 1) : undefined;
+                        handleFilterUpdate('fechaConvocatoria', {
+                          ...fechaConvocatoria,
+                          desde: newDate
+                        });
+                      }}
+                      className="text-xs form-input py-1"
+                      disabled={loading}
+                    >
+                      <option value="">Año</option>
+                      {Array.from({ length: 18 }, (_, i) => 2025 - i).map(year => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-600 mb-1 block">Hasta</label>
+                  <div className="grid grid-cols-2 gap-1">
+                    <select
+                      value={filters.fechaConvocatoria?.hasta?.getMonth() ?? ''}
+                      onChange={(e) => {
+                        const fechaConvocatoria = filters.fechaConvocatoria || {};
+                        const currentYear = fechaConvocatoria.hasta?.getFullYear() ?? new Date().getFullYear();
+                        const month = parseInt(e.target.value);
+                        const newDate = e.target.value !== '' ? new Date(currentYear, month + 1, 0) : undefined; // Last day of month
+                        handleFilterUpdate('fechaConvocatoria', {
+                          ...fechaConvocatoria,
+                          hasta: newDate
+                        });
+                      }}
+                      className="text-xs form-input py-1"
+                      disabled={loading}
+                    >
+                      <option value="">Mes</option>
+                      <option value="0">Ene</option>
+                      <option value="1">Feb</option>
+                      <option value="2">Mar</option>
+                      <option value="3">Abr</option>
+                      <option value="4">May</option>
+                      <option value="5">Jun</option>
+                      <option value="6">Jul</option>
+                      <option value="7">Ago</option>
+                      <option value="8">Sep</option>
+                      <option value="9">Oct</option>
+                      <option value="10">Nov</option>
+                      <option value="11">Dic</option>
+                    </select>
+                    <select
+                      value={filters.fechaConvocatoria?.hasta?.getFullYear() ?? ''}
+                      onChange={(e) => {
+                        const fechaConvocatoria = filters.fechaConvocatoria || {};
+                        const currentMonth = fechaConvocatoria.hasta?.getMonth() ?? 0;
+                        const newDate = e.target.value !== '' ? new Date(parseInt(e.target.value), currentMonth + 1, 0) : undefined; // Last day of month
+                        handleFilterUpdate('fechaConvocatoria', {
+                          ...fechaConvocatoria,
+                          hasta: newDate
+                        });
+                      }}
+                      className="text-xs form-input py-1"
+                      disabled={loading}
+                    >
+                      <option value="">Año</option>
+                      {Array.from({ length: 18 }, (_, i) => 2025 - i).map(year => (
+                        <option key={year} value={year}>{year}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Display selected range */}
+              {(filters.fechaConvocatoria?.desde || filters.fechaConvocatoria?.hasta) && (
+                <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                  Rango seleccionado: {' '}
+                  {filters.fechaConvocatoria?.desde ? 
+                    filters.fechaConvocatoria.desde.toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }) : 
+                    'Sin inicio'} 
+                  {' → '}
+                  {filters.fechaConvocatoria?.hasta ? 
+                    filters.fechaConvocatoria.hasta.toLocaleDateString('es-ES', { month: 'short', year: 'numeric' }) : 
+                    'Sin fin'}
+                </div>
+              )}
             </div>
           </div>
 

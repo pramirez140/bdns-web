@@ -11,7 +11,7 @@ interface Grant {
   organoConvocante: string;
   fechaPublicacion: string;
   fechaApertura: string;
-  fechaCierre: string;
+  fechaCierre: string | null;
   importeTotal: number;
   objetivos: string;
   beneficiarios: string;
@@ -40,11 +40,23 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
       const params = new URLSearchParams();
       
       if (searchState.filters.query) params.append('q', searchState.filters.query);
-      if (searchState.filters.organoConvocante) params.append('organo', searchState.filters.organoConvocante);
+      if (searchState.filters.organoConvocante) {
+        if (Array.isArray(searchState.filters.organoConvocante)) {
+          params.append('organo', searchState.filters.organoConvocante.join(','));
+        } else {
+          params.append('organo', searchState.filters.organoConvocante);
+        }
+      }
       if (searchState.filters.importeMinimo) params.append('importe_min', searchState.filters.importeMinimo.toString());
       if (searchState.filters.importeMaximo) params.append('importe_max', searchState.filters.importeMaximo.toString());
-      if (searchState.filters.fechaDesde) params.append('fecha_desde', searchState.filters.fechaDesde);
-      if (searchState.filters.fechaHasta) params.append('fecha_hasta', searchState.filters.fechaHasta);
+      if (searchState.filters.fechaConvocatoria?.desde) {
+        const fecha = searchState.filters.fechaConvocatoria.desde;
+        params.append('fecha_desde', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+      }
+      if (searchState.filters.fechaConvocatoria?.hasta) {
+        const fecha = searchState.filters.fechaConvocatoria.hasta;
+        params.append('fecha_hasta', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+      }
       if (searchState.filters.estadoConvocatoria) params.append('estado', searchState.filters.estadoConvocatoria);
       
       if (searchState.params.page) params.append('page', searchState.params.page.toString());
@@ -124,6 +136,13 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
     
     const now = new Date();
     const start = new Date(grant.fechaApertura);
+    
+    // Handle null fechaCierre
+    if (!grant.fechaCierre) {
+      if (now < start) return { label: 'Opening Soon', color: 'yellow' };
+      return { label: 'Open', color: 'green' }; // If no close date, assume open after start
+    }
+    
     const end = new Date(grant.fechaCierre);
     
     if (now < start) return { label: 'Opening Soon', color: 'yellow' };
@@ -245,10 +264,56 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
                   <span className="font-medium">Applications Open</span>
                   <span className="text-gray-600">{formatDate(grant.fechaApertura)}</span>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
-                  <span className="font-medium">Applications Close</span>
-                  <span className="text-gray-600">{formatDate(grant.fechaCierre)}</span>
-                </div>
+                {(() => {
+                  const pubDate = new Date(grant.fechaPublicacion);
+                  const closeDate = grant.fechaCierre ? new Date(grant.fechaCierre) : null;
+                  
+                  // Detect artificial close dates (more than 1 year after publication for old grants)
+                  const isArtificialCloseDate = closeDate && 
+                    (closeDate.getFullYear() - pubDate.getFullYear() > 1) &&
+                    pubDate.getFullYear() < 2020;
+                  
+                  if (closeDate && !isArtificialCloseDate) {
+                    return (
+                      <div className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                        <span className="font-medium">Applications Close</span>
+                        <span className="text-gray-600">{formatDate(closeDate!.toISOString())}</span>
+                      </div>
+                    );
+                  } else if (!closeDate) {
+                    // Show information for grants without specific closing date  
+                    return (
+                      <div className="p-3 bg-blue-50 rounded border border-blue-200">
+                        <div className="flex items-start space-x-3">
+                          <div className="flex-shrink-0">
+                            <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-medium text-blue-900">⚠️ Application Period Details</span>
+                            <p className="text-sm text-blue-800 mt-1">
+                              Specific application deadline information is available in the official BDNS portal. 
+                              Common formats include "X working days from publication" or "until budget exhausted".
+                            </p>
+                            <a 
+                              href={grant.enlaceOficial} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 mt-2 font-medium"
+                            >
+                              View application deadlines on BDNS
+                              <svg className="ml-1 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                              </svg>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 
