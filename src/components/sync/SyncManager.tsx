@@ -39,12 +39,17 @@ interface LatestSync {
 }
 
 export function SyncManager() {
+  const [mounted, setMounted] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCompleteMigrating, setIsCompleteMigrating] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [currentSyncId, setCurrentSyncId] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [latestSync, setLatestSync] = useState<LatestSync | null>(null);
@@ -291,6 +296,16 @@ export function SyncManager() {
 
   const healthStatus = getHealthStatus();
   const HealthIcon = healthStatus.icon;
+
+  if (!mounted) {
+    return (
+      <Card className="w-full max-w-2xl">
+        <CardHeader>
+          <CardTitle>Cargando...</CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-2xl">

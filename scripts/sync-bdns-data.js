@@ -118,30 +118,20 @@ class BDNSDataSynchronizer {
         hasta: `31/12/${currentYear}`
       };
     } else {
-      // Incremental sync: get data from last sync date (last 7 days max)
-      const query = "SELECT config_value FROM search_config WHERE config_key = 'last_full_sync'";
-      const result = await pool.query(query);
-      let lastSync;
-      
-      if (result.rows.length > 0 && result.rows[0].config_value) {
-        lastSync = new Date(result.rows[0].config_value);
-        // Limit incremental to max 7 days to avoid large syncs
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        if (lastSync < sevenDaysAgo) {
-          lastSync = sevenDaysAgo;
-        }
-      } else {
-        // If no last sync, get last 3 days
-        lastSync = new Date();
-        lastSync.setDate(lastSync.getDate() - 3);
-      }
-      
+      // Incremental sync: get recent data (last 7 days)
+      // Skip complex date logic and just get last week to ensure we have data
       const today = new Date();
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(today.getDate() - 7);
+      
+      const yesterday = new Date();
+      yesterday.setDate(today.getDate() - 1);
+      
+      console.log(`[SYNC] 📅 Incremental sync: ${this.formatDateForBDNS(sevenDaysAgo)} to ${this.formatDateForBDNS(yesterday)}`);
       
       return {
-        desde: this.formatDateForBDNS(lastSync),
-        hasta: this.formatDateForBDNS(today)
+        desde: this.formatDateForBDNS(sevenDaysAgo),
+        hasta: this.formatDateForBDNS(yesterday)
       };
     }
   }
