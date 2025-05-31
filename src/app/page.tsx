@@ -55,6 +55,7 @@ function HomePage() {
     searchState, 
     restoreScrollPosition, 
     saveScrollPosition,
+    saveSearchState,
     hasValidCache 
   } = useEnhancedSearchState();
   
@@ -84,37 +85,71 @@ function HomePage() {
       console.log('✅ Frontend received results:', { total: results.total, count: results.data.length });
       
       setSearchResults(results);
+      
+      // Save search state to persistence for back navigation
+      saveSearchState({
+        filters: searchFilters,
+        params: searchParams,
+        results: results,
+      });
+      
     } catch (err: any) {
       console.error('Search error details:', err);
       setError(`Error: ${err.message || 'Error desconocido'}. Ver consola para más detalles.`);
     } finally {
       setLoading(false);
     }
-  }, [currentFilters, currentParams]);
+  }, [currentFilters, currentParams, saveSearchState]);
 
   // Load initial state from URL on mount with cached results
   useEffect(() => {
     if (!hasInitialLoad) {
       setHasInitialLoad(true);
       
-      // Check if we have valid cached results
+      // Check if we have valid cached results that match current URL state
       if (hasValidCache() && searchState.results) {
-        console.log('🚀 Restoring cached search results');
-        setSearchResults(searchState.results);
+        const cachedFilters = searchState.filters;
+        const cachedParams = searchState.params;
         
-        // Restore scroll position after a short delay
-        setTimeout(() => {
-          restoreScrollPosition();
-        }, 100);
+        // Check if cached state matches current URL state
+        if (JSON.stringify(cachedFilters) === JSON.stringify(currentFilters) &&
+            JSON.stringify(cachedParams) === JSON.stringify(currentParams)) {
+          console.log('🚀 Restoring cached search results that match URL');
+          setSearchResults(searchState.results);
+          
+          // Restore scroll position after a short delay
+          setTimeout(() => {
+            restoreScrollPosition();
+          }, 100);
+          return; // Don't perform new search
+        }
       }
-      // If URL has search parameters but no cache, perform search
-      else if (currentFilters.query || currentFilters.organoConvocante || 
+      
+      // If URL has search parameters, perform search (either no cache or cache doesn't match)
+      if (currentFilters.query || currentFilters.organoConvocante || 
           currentFilters.importeMinimo || currentFilters.importeMaximo ||
           currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria) {
         performSearch();
       }
     }
-  }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState.results, restoreScrollPosition]);
+  }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState, restoreScrollPosition]);
+
+  // Save scroll position periodically
+  useEffect(() => {
+    const handleScroll = () => {
+      // Debounce scroll position saving
+      clearTimeout(window.scrollSaveTimeout);
+      window.scrollSaveTimeout = setTimeout(() => {
+        saveScrollPosition();
+      }, 500);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(window.scrollSaveTimeout);
+    };
+  }, [saveScrollPosition]);
 
   // Handle new search from form
   const handleSearch = async (query?: string, filters?: SearchFilters) => {

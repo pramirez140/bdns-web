@@ -30,7 +30,35 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
   // Enhanced back navigation with scroll restoration
   const handleBackToSearch = () => {
     const searchQuery = searchParams.toString();
-    const returnUrl = searchQuery ? `/?${searchQuery}` : '/';
+    let returnUrl = '/';
+    
+    if (searchQuery) {
+      // Use URL parameters if available
+      returnUrl = `/?${searchQuery}`;
+    } else if (searchState.filters || searchState.params) {
+      // Fall back to cached search state if no URL parameters
+      const params = new URLSearchParams();
+      
+      if (searchState.filters.query) params.append('q', searchState.filters.query);
+      if (searchState.filters.organoConvocante) params.append('organo', searchState.filters.organoConvocante);
+      if (searchState.filters.importeMinimo) params.append('importe_min', searchState.filters.importeMinimo.toString());
+      if (searchState.filters.importeMaximo) params.append('importe_max', searchState.filters.importeMaximo.toString());
+      if (searchState.filters.fechaDesde) params.append('fecha_desde', searchState.filters.fechaDesde);
+      if (searchState.filters.fechaHasta) params.append('fecha_hasta', searchState.filters.fechaHasta);
+      if (searchState.filters.estadoConvocatoria) params.append('estado', searchState.filters.estadoConvocatoria);
+      
+      if (searchState.params.page) params.append('page', searchState.params.page.toString());
+      if (searchState.params.pageSize) params.append('pageSize', searchState.params.pageSize.toString());
+      if (searchState.params.sortBy) params.append('sortBy', searchState.params.sortBy);
+      if (searchState.params.sortOrder) params.append('sortOrder', searchState.params.sortOrder);
+      
+      const queryString = params.toString();
+      if (queryString) {
+        returnUrl = `/?${queryString}`;
+      }
+    }
+    
+    console.log('🔄 Back navigation:', { searchQuery, cachedState: searchState, returnUrl });
     
     // Save the current item position for future reference
     saveResultItemPosition(params.id, window.pageYOffset);
