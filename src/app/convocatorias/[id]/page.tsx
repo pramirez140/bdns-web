@@ -54,8 +54,15 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
       
       const queryString = params.toString();
       if (queryString) {
-        returnUrl = `/?${queryString}`;
+        returnUrl = `/?${queryString}&from=${params.id}`;
       }
+    }
+    
+    // Add reference to current item for scroll positioning
+    if (returnUrl.includes('?')) {
+      returnUrl += `&from=${params.id}`;
+    } else {
+      returnUrl += `?from=${params.id}`;
     }
     
     console.log('🔄 Back navigation:', { searchQuery, cachedState: searchState, returnUrl });

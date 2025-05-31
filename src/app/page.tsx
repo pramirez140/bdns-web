@@ -106,21 +106,64 @@ function HomePage() {
     if (!hasInitialLoad) {
       setHasInitialLoad(true);
       
-      // Check if we have valid cached results that match current URL state
+      // Priority 1: Check if this is a back navigation (has 'from' parameter)
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromItem = urlParams.get('from');
+      
+      if (fromItem && hasValidCache() && searchState.results) {
+        console.log('🔄 Back navigation detected, restoring cached results instantly');
+        setSearchResults(searchState.results);
+        setLoading(false);
+        setError(null);
+        
+        // Scroll to the specific item immediately
+        setTimeout(() => {
+          const element = document.querySelector(`[data-grant-id="${fromItem}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            restoreScrollPosition();
+          }
+        }, 100);
+        return;
+      }
+      
+      // Priority 2: Check if we have valid cached results that match current URL state
       if (hasValidCache() && searchState.results) {
         const cachedFilters = searchState.filters;
         const cachedParams = searchState.params;
         
-        // Check if cached state matches current URL state
-        if (JSON.stringify(cachedFilters) === JSON.stringify(currentFilters) &&
-            JSON.stringify(cachedParams) === JSON.stringify(currentParams)) {
-          console.log('🚀 Restoring cached search results that match URL');
-          setSearchResults(searchState.results);
+        // Check if cached state matches current URL state (allow some flexibility)
+        const filtersMatch = JSON.stringify(cachedFilters) === JSON.stringify(currentFilters);
+        const paramsMatch = cachedParams.page === currentParams.page && 
+                           cachedParams.sortBy === currentParams.sortBy &&
+                           cachedParams.sortOrder === currentParams.sortOrder;
+        
+        if (filtersMatch && (paramsMatch || !currentParams.page)) {
+          console.log('🚀 Instantly restoring cached results and scroll position');
           
-          // Restore scroll position after a short delay
+          // Set results immediately without loading
+          setSearchResults(searchState.results);
+          setLoading(false);
+          setError(null);
+          
+          // Restore scroll position immediately after DOM update
           setTimeout(() => {
             restoreScrollPosition();
-          }, 100);
+          }, 50);
+          
+          // Also try to scroll to specific item if available
+          setTimeout(() => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fromItem = urlParams.get('from');
+            if (fromItem) {
+              const element = document.querySelector(`[data-grant-id="${fromItem}"]`);
+              if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+          }, 200);
+          
           return; // Don't perform new search
         }
       }

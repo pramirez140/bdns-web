@@ -193,7 +193,9 @@ export function useSearchPersistence(): UseSearchPersistenceReturn {
     return Boolean(
       searchState.results && 
       searchState.lastSearchTimestamp &&
-      (Date.now() - searchState.lastSearchTimestamp) < CACHE_DURATION
+      (Date.now() - searchState.lastSearchTimestamp) < CACHE_DURATION &&
+      searchState.results.data && 
+      searchState.results.data.length > 0
     );
   }, [searchState.results, searchState.lastSearchTimestamp]);
 

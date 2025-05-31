@@ -35,9 +35,17 @@ export default function SearchResults({
 
   // Save scroll position when clicking on a grant
   const handleGrantClick = (grantId: string) => {
-    const currentPosition = window.pageYOffset || document.documentElement.scrollTop;
+    // Save current scroll position
     saveScrollPosition();
-    saveResultItemPosition(grantId, currentPosition);
+    
+    // Save the position of this specific item for precise restoration
+    const element = document.querySelector(`[data-grant-id="${grantId}"]`);
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const elementPosition = scrollTop + rect.top;
+      saveResultItemPosition(grantId, elementPosition);
+    }
   };
 
   const formatCurrency = (amount: number) => {
@@ -224,7 +232,11 @@ export default function SearchResults({
       {/* Results List */}
       <div className="space-y-4">
         {data.map((convocatoria) => (
-          <div key={convocatoria.identificador} className="card p-6 hover:shadow-md transition-shadow">
+          <div 
+            key={convocatoria.identificador} 
+            data-grant-id={convocatoria.identificador}
+            className="card p-6 hover:shadow-md transition-shadow"
+          >
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
                 <Link 
