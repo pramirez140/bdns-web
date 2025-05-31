@@ -4,29 +4,53 @@
 
 This document details the PostgreSQL database structure used for the BDNS (Base de Datos Nacional de Subvenciones) system, including table schemas, indexes, relationships, and optimization strategies.
 
+### Current Database Status (Live System - May 31, 2025)
+- ✅ **PostgreSQL 15**: Running in Docker container
+- ✅ **Complete Data**: 562,536 grants fully stored
+- ✅ **Historical Migration**: ✅ COMPLETED (May 30, 2025)
+- ✅ **Full-Text Search**: Spanish language configuration active
+- ✅ **Data Integrity**: €882+ billion in financial data tracked
+- ✅ **Multi-Organization**: 4,481 unique funding bodies
+
 ## Database Configuration
 
-### PostgreSQL Setup
-- **Version**: PostgreSQL 15
+### PostgreSQL Setup (Production Environment)
+- **Version**: PostgreSQL 15 (Docker container)
 - **Language**: Spanish (for full-text search)
 - **Encoding**: UTF8
 - **Collation**: Spanish locale support
 - **Extensions**: `pg_trgm` (trigram matching), `unaccent` (accent removal)
+- **Connection**: `postgresql://bdns_user:bdns_password@postgres:5432/bdns_db`
+- **Status**: ✅ **HEALTHY** - Container running with real data
 
-### Connection Details
+### Connection Details (Current System)
 ```yaml
-# Docker configuration
+# Docker configuration (Active)
 POSTGRES_DB: bdns_db
 POSTGRES_USER: bdns_user
 POSTGRES_PASSWORD: bdns_password
 POSTGRES_PORT: 5432
+POSTGRES_HOST: postgres  # Docker container name
 ```
 
-## Main Tables
+**Connection String**:
+```
+postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
+```
 
-### 1. convocatorias
+**Health Check**:
+```bash
+curl http://localhost:3000/api/health
+# Returns: {"status": "healthy"}
+```
+
+## Main Tables (Current Schema)
+
+### 1. convocatorias (Primary Table)
 
 The primary table storing grant announcements from the BDNS system.
+
+**Current Data**: 562,536 grants with €882+ billion in tracked funding
 
 ```sql
 CREATE TABLE convocatorias (
@@ -62,9 +86,11 @@ CREATE TABLE convocatorias (
 | `created_at` | TIMESTAMP | Record creation time | 2024-01-20 10:30:00 |
 | `updated_at` | TIMESTAMP | Last update time | 2024-01-21 15:45:00 |
 
-### 2. sync_status
+### 2. sync_status (Sync Tracking)
 
 Tracks synchronization operations and their status.
+
+**Current Status**: Complete migration finished successfully
 
 ```sql
 CREATE TABLE sync_status (
@@ -83,9 +109,11 @@ CREATE TABLE sync_status (
 );
 ```
 
-### 3. api_logs
+### 3. api_logs (Request Monitoring)
 
 Logs API requests and responses for monitoring and debugging.
+
+**Current Activity**: Operational logging of BDNS API requests
 
 ```sql
 CREATE TABLE api_logs (
@@ -100,9 +128,9 @@ CREATE TABLE api_logs (
 );
 ```
 
-## Indexes
+## Indexes (Current Performance Optimization)
 
-### Primary Indexes
+### Primary Indexes (Active on Live Data)
 
 ```sql
 -- Primary key indexes (automatic)
@@ -123,7 +151,7 @@ CREATE INDEX idx_convocatorias_organo ON convocatorias(organo);
 CREATE INDEX idx_convocatorias_presupuesto ON convocatorias(presupuesto) WHERE presupuesto IS NOT NULL;
 ```
 
-### Performance Indexes
+### Performance Indexes (Optimized for 562k+ Records)
 
 ```sql
 -- Composite index for common queries
@@ -137,9 +165,9 @@ WHERE fecha_fin_solicitud >= CURRENT_DATE;
 CREATE INDEX idx_sync_status_type_date ON sync_status(sync_type, started_at);
 ```
 
-## Full-Text Search Configuration
+## Full-Text Search Configuration (Production Ready)
 
-### Spanish Language Support
+### Spanish Language Support (Currently Active)
 
 ```sql
 -- Set default text search configuration to Spanish
@@ -149,9 +177,9 @@ ALTER DATABASE bdns_db SET default_text_search_config = 'spanish';
 CREATE TEXT SEARCH CONFIGURATION es_custom (COPY = spanish);
 ```
 
-### Search Vector Generation
+### Search Vector Generation (Live System)
 
-The `full_text_search` column is automatically generated using a trigger:
+The `full_text_search` column is automatically generated using a trigger (optimized for 562k+ grants):
 
 ```sql
 CREATE OR REPLACE FUNCTION update_search_vector()
@@ -178,9 +206,9 @@ CREATE TRIGGER update_convocatorias_search_vector
 | B | `organo` | High | Organization-based filtering |
 | C | `descripcion` | Medium | Content-based search |
 
-## Query Patterns
+## Query Patterns (Tested on Live Data)
 
-### 1. Full-Text Search
+### 1. Full-Text Search (Working on 562k+ Grants)
 
 ```sql
 -- Basic text search
@@ -368,7 +396,7 @@ docker exec -i bdns-postgres psql -U bdns_user -d bdns_db < backup_20240120.sql
 docker exec -i bdns-postgres psql -U bdns_user -d bdns_db < data_backup_20240120.sql
 ```
 
-## Performance Metrics
+## Performance Metrics (Live System Monitoring)
 
 ### 1. Query Performance
 
@@ -456,4 +484,46 @@ pgbouncer:
     DEFAULT_POOL_SIZE: 100
 ```
 
-This database structure is optimized for the BDNS system's requirements, supporting fast full-text search, efficient data synchronization, and comprehensive grant management. For API-specific details, see `API-CONNECTION.md`.
+## Current Database Statistics (Real-Time)
+
+**Live Performance Metrics** (as of May 31, 2025):
+```bash
+# Get current database statistics
+curl http://localhost:3000/api/sync | jq '.data.database_stats'
+# Returns:
+# {
+#   "total_convocatorias": 562536,
+#   "convocatorias_abiertas": 29590,
+#   "total_organismos": 4481,
+#   "importe_total_acumulado": 882065753289.85,
+#   "fecha_mas_antigua": "2008-10-08T00:00:00.000Z",
+#   "fecha_mas_reciente": "2025-05-30T00:00:00.000Z"
+# }
+```
+
+**Database Health Check**:
+```bash
+# Verify database connectivity
+curl http://localhost:3000/api/health
+# Returns: {"status": "healthy"}
+
+# Check container status
+docker-compose ps postgres
+# Returns: Up (healthy)
+```
+
+**Migration Status**:
+- ✅ **Complete Migration**: Historical migration successfully finished
+- ✅ **Full Database**: 562,536 grants fully loaded and operational
+- ✅ **Performance**: Full-text search optimized for Spanish language
+- ✅ **Integrity**: All constraints and indexes functioning properly
+
+## Database Schema Evolution
+
+This database structure is optimized for the BDNS system's requirements, supporting:
+- **Fast full-text search** across 562k+ grants (complete historical coverage)
+- **Efficient data synchronization** with automatic UPSERT operations
+- **Comprehensive grant management** with Spanish language support
+- **Real-time statistics** and monitoring capabilities
+
+For API-specific details and endpoints, see `API-CONNECTION.md`.

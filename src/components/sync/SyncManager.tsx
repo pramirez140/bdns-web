@@ -48,6 +48,9 @@ export function SyncManager() {
   const [currentSyncId, setCurrentSyncId] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
   const [latestSync, setLatestSync] = useState<LatestSync | null>(null);
+  const [syncJustStarted, setSyncJustStarted] = useState(false);
+  const [isUpdatingLatestSync, setIsUpdatingLatestSync] = useState(false);
+  const [lastSyncUpdate, setLastSyncUpdate] = useState<Date>(new Date());
 
   // Fetch sync status
   const fetchSyncStatus = async () => {
@@ -78,6 +81,9 @@ export function SyncManager() {
         setIsSyncing(true);
       }
       
+      // Mark that we just started a sync
+      setSyncJustStarted(true);
+      
       const response = await fetch('/api/sync', {
         method: 'POST',
         headers: {
@@ -91,18 +97,32 @@ export function SyncManager() {
         console.log(`${type} sync started:`, data);
         setCurrentSyncId(data.sync_id?.toString() || null);
         
+        // Clear previous sync data and show "in progress" immediately
+        setLatestSync({
+          id: data.sync_id,
+          sync_type: type,
+          status: 'running',
+          started_at: new Date().toISOString(),
+          completed_at: null,
+          processed_pages: 0,
+          processed_records: 0,
+          new_records: 0,
+          updated_records: 0,
+          error_message: null
+        });
+        
         // Start polling for logs if complete migration
         if (type === 'complete') {
           startLogPolling(data.sync_id?.toString());
+        } else {
+          // Start polling for progress on incremental/full sync
+          startProgressPolling();
         }
         
         // Refresh status after a delay
         setTimeout(() => {
           fetchSyncStatus();
-          if (type !== 'complete') {
-            setIsSyncing(false);
-          }
-        }, 3000);
+        }, 1000);
       } else {
         console.error('Failed to start sync');
         setIsSyncing(false);
@@ -113,6 +133,55 @@ export function SyncManager() {
       setIsSyncing(false);
       setIsCompleteMigrating(false);
     }
+  };
+
+  // Poll for progress during incremental/full sync
+  const startProgressPolling = () => {
+    let pollCount = 0;
+    const pollInterval = setInterval(async () => {
+      try {
+        pollCount++;
+        await fetchLatestSync();
+        await fetchSyncStatus();
+        
+        console.log(`[SYNC PANEL] Poll #${pollCount}, Latest sync:`, latestSync?.status, latestSync?.processed_pages);
+        
+        // Clear the "just started" flag after first poll
+        if (pollCount === 1) {
+          setSyncJustStarted(false);
+        }
+        
+        // After 3 polls (9 seconds), start checking if sync is done
+        if (pollCount > 3) {
+          // Check if no progress is being made (sync likely finished)
+          if (latestSync && (latestSync.status === 'completed' || latestSync.status === 'failed')) {
+            clearInterval(pollInterval);
+            console.log('[SYNC PANEL] Sync finished, clearing temporary banner');
+            
+            // Update sync status to refresh última sincronización
+            await fetchSyncStatus();
+            
+            // Clear temporary banner immediately
+            setIsSyncing(false);
+            setIsCompleteMigrating(false);
+            setSyncJustStarted(false);
+            console.log('[SYNC PANEL] Temporary banner hidden');
+            return;
+          }
+        }
+        
+        // Auto-hide after 60 seconds regardless
+        if (pollCount >= 20) {
+          clearInterval(pollInterval);
+          setIsSyncing(false);
+          setIsCompleteMigrating(false);
+          console.log('[SYNC PANEL] Auto-hiding after 60 seconds');
+        }
+        
+      } catch (error) {
+        console.error('Error polling progress:', error);
+      }
+    }, 3000); // Poll every 3 seconds
   };
 
   // Poll for logs during complete migration
@@ -148,29 +217,55 @@ export function SyncManager() {
     }, 3600000);
   };
 
-  // Auto-refresh status every 30 seconds
+  // Auto-refresh status every 60 seconds (reduced frequency)
   useEffect(() => {
     fetchSyncStatus();
-    const interval = setInterval(fetchSyncStatus, 30000);
+    const interval = setInterval(fetchSyncStatus, 60000);
     return () => clearInterval(interval);
   }, []);
 
   // Fetch latest sync info
   const fetchLatestSync = async () => {
     try {
-      const response = await fetch('/api/sync/logs');
+      setIsUpdatingLatestSync(true);
+      const response = await fetch('/api/sync');
       if (response.ok) {
         const data = await response.json();
-        setLatestSync(data.data.latest_sync);
+        const latest = data.data.latest_sync;
+        console.log('[SYNC PANEL] Fetched latest sync:', latest);
+        setLatestSync(latest);
+        setLastSyncUpdate(new Date());
       }
     } catch (error) {
       console.error('Error fetching latest sync:', error);
+    } finally {
+      setIsUpdatingLatestSync(false);
     }
   };
 
   useEffect(() => {
     fetchLatestSync();
   }, [syncStatus]);
+
+  // Enhanced polling for active syncs - update latest sync info more frequently
+  useEffect(() => {
+    let pollInterval: NodeJS.Timeout;
+    
+    // If there's an active sync, poll more frequently
+    if (latestSync?.status === 'running') {
+      console.log('[SYNC PANEL] Starting enhanced polling for active sync');
+      pollInterval = setInterval(() => {
+        fetchLatestSync();
+      }, 3000); // Poll every 3 seconds for active syncs
+    }
+
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        console.log('[SYNC PANEL] Stopped enhanced polling');
+      }
+    };
+  }, [latestSync?.status]);
 
   const formatNumber = (num: number) => {
     return new Intl.NumberFormat('es-ES').format(num);
@@ -220,27 +315,30 @@ export function SyncManager() {
       <CardContent className="space-y-6">
         {/* Statistics */}
         {syncStatus && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {formatNumber(syncStatus.database_stats.total_convocatorias)}
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-600">
+                  {formatNumber(syncStatus.database_stats.total_convocatorias)}
+                </div>
+                <div className="text-sm text-muted-foreground">Total Convocatorias</div>
               </div>
-              <div className="text-sm text-muted-foreground">Total Convocatorias</div>
+              
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600">
+                  {formatNumber(syncStatus.database_stats.convocatorias_abiertas)}
+                </div>
+                <div className="text-sm text-muted-foreground">Abiertas</div>
+              </div>
+              
+              <div className="text-center">
+                <div className="text-2xl font-bold text-purple-600">
+                  {syncStatus.database_stats.ultima_sincronizacion ? formatDate(syncStatus.database_stats.ultima_sincronizacion) : 'Nunca'}
+                </div>
+                <div className="text-sm text-muted-foreground">Última Sincronización</div>
+              </div>
             </div>
             
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
-                {formatNumber(syncStatus.database_stats.convocatorias_abiertas)}
-              </div>
-              <div className="text-sm text-muted-foreground">Abiertas</div>
-            </div>
-            
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">
-                {syncStatus.last_sync ? formatDate(syncStatus.last_sync) : 'Nunca'}
-              </div>
-              <div className="text-sm text-muted-foreground">Última Sincronización</div>
-            </div>
           </div>
         )}
 
@@ -270,7 +368,7 @@ export function SyncManager() {
             >
               <Database className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
               <span>Sincronización Completa</span>
-              <span className="text-xs text-muted-foreground">Descargar datos recientes (2023+)</span>
+              <span className="text-xs text-muted-foreground">Datos de 2025 (optimizado)</span>
             </Button>
 
             <Button
@@ -281,7 +379,7 @@ export function SyncManager() {
             >
               <Database className={`h-4 w-4 ${isCompleteMigrating ? 'animate-spin' : ''}`} />
               <span>Migración Completa</span>
-              <span className="text-xs text-muted-foreground">TODAS las 300k+ convocatorias</span>
+              <span className="text-xs text-muted-foreground">Histórico completo (solo si es necesario)</span>
             </Button>
           </div>
 
@@ -336,40 +434,94 @@ export function SyncManager() {
             </div>
           )}
 
-          {/* Latest sync information */}
+          {/* Latest sync details panel - always visible */}
           {latestSync && (
-            <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-              <h4 className="text-md font-semibold mb-2">📊 Última Sincronización</h4>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="font-medium">Tipo:</span> {latestSync.sync_type}
-                </div>
-                <div>
-                  <span className="font-medium">Estado:</span> 
-                  <Badge variant={latestSync.status === 'completed' ? 'default' : 'secondary'} className="ml-1">
-                    {latestSync.status}
-                  </Badge>
-                </div>
-                <div>
-                  <span className="font-medium">Páginas:</span> {latestSync.processed_pages?.toLocaleString() || 0}
-                </div>
-                <div>
-                  <span className="font-medium">Registros:</span> {latestSync.processed_records?.toLocaleString() || 0}
-                </div>
-                <div>
-                  <span className="font-medium">Nuevos:</span> {latestSync.new_records?.toLocaleString() || 0}
-                </div>
-                <div>
-                  <span className="font-medium">Actualizados:</span> {latestSync.updated_records?.toLocaleString() || 0}
+            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-md font-semibold text-blue-800">
+                  📊 Última Sincronización
+                </h4>
+                <div className="text-xs text-blue-600 flex items-center">
+                  {latestSync.status === 'running' && (
+                    <>
+                      <div className="animate-spin mr-1">🔄</div>
+                      En progreso...
+                    </>
+                  )}
+                  {(latestSync.status === 'completed' || latestSync.status === 'idle') && (
+                    <>
+                      Completado
+                    </>
+                  )}
+                  {latestSync.status === 'failed' && (
+                    <>
+                      <div className="mr-1">❌</div>
+                      Falló
+                    </>
+                  )}
                 </div>
               </div>
-              {latestSync.error_message && (
-                <div className="mt-2 p-2 bg-red-100 border border-red-200 rounded text-sm text-red-800">
-                  <span className="font-medium">Error:</span> {latestSync.error_message}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-blue-600">
+                    {latestSync.sync_type === 'complete' ? 'Completa' : 
+                     latestSync.sync_type === 'full' ? 'Completa' : 
+                     'Incremental'}
+                  </div>
+                  <div className="text-xs text-gray-600">Tipo</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-green-600">
+                    {latestSync?.processed_pages?.toLocaleString() || '0'}
+                  </div>
+                  <div className="text-xs text-gray-600">Páginas</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-purple-600">
+                    {latestSync?.new_records?.toLocaleString() || '0'}
+                  </div>
+                  <div className="text-xs text-gray-600">Nuevas</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-orange-600">
+                    {latestSync?.updated_records?.toLocaleString() || '0'}
+                  </div>
+                  <div className="text-xs text-gray-600">Actualizadas</div>
+                </div>
+              </div>
+              <div className="mt-3 text-center">
+                <div className="text-sm text-gray-600">
+                  Total procesados: <span className="font-medium">{latestSync?.processed_records?.toLocaleString() || '0'}</span>
+                </div>
+                {latestSync.started_at && (
+                  <div className="text-xs text-gray-500 mt-1">
+                    Iniciada: {new Date(latestSync.started_at).toLocaleString('es-ES')}
+                  </div>
+                )}
+                {latestSync.completed_at && (
+                  <div className="text-xs text-gray-500">
+                    Finalizada: {new Date(latestSync.completed_at).toLocaleString('es-ES')}
+                  </div>
+                )}
+                {latestSync.status === 'running' && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    Última actualización: {lastSyncUpdate.toLocaleTimeString('es-ES')}
+                  </div>
+                )}
+              </div>
+              {latestSync?.status === 'completed' && (
+                <div className="mt-2 text-center text-xs text-green-700 bg-green-100 p-2 rounded">
+                  Sincronización finalizada con éxito
+                </div>
+              )}
+              {latestSync?.status === 'failed' && latestSync.error_message && (
+                <div className="mt-2 text-center text-xs text-red-700 bg-red-100 p-2 rounded">
+                  ❌ Error: {latestSync.error_message}
                 </div>
               )}
             </div>
           )}
+
         </div>
 
         <Separator />

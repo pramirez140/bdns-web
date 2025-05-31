@@ -9,13 +9,9 @@ import {
   DocumentTextIcon,
   CalendarIcon,
   CurrencyEuroIcon,
-  BuildingOfficeIcon,
-  CurrencyDollarIcon,
-  ArrowPathIcon
+  BuildingOfficeIcon
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
-import { useBudgetExtraction } from '@/hooks/useBudgetExtraction';
-import { useState } from 'react';
 
 interface SearchResultsProps {
   results: SearchResult<ConvocatoriaData>;
@@ -34,24 +30,8 @@ export default function SearchResults({
   currentSort 
 }: SearchResultsProps) {
   const { data, total, page, pageSize, totalPages } = results;
-  const { 
-    loading, 
-    error, 
-    extractBudget, 
-    extractMultipleBudgets, 
-    getBudget, 
-    isExtracting, 
-    clearError 
-  } = useBudgetExtraction();
-  const [showBudgetButtons, setShowBudgetButtons] = useState(false);
 
-  const formatCurrency = (amount: number, convocatoriaId: string) => {
-    const budgetInfo = getBudget(convocatoriaId);
-    
-    if (budgetInfo?.presupuestoTexto) {
-      return budgetInfo.presupuestoTexto;
-    }
-    
+  const formatCurrency = (amount: number) => {
     if (amount === 0) {
       return 'Ver convocatoria oficial';
     }
@@ -62,23 +42,6 @@ export default function SearchResults({
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(amount);
-  };
-
-  const handleExtractBudget = async (convocatoriaId: string) => {
-    try {
-      await extractBudget(convocatoriaId);
-    } catch (error) {
-      console.error('Error extracting budget:', error);
-    }
-  };
-
-  const handleExtractAllBudgets = async () => {
-    try {
-      const convocatoriaIds = data.map(conv => conv.identificador);
-      await extractMultipleBudgets(convocatoriaIds);
-    } catch (error) {
-      console.error('Error extracting budgets:', error);
-    }
   };
 
   const formatDate = (date: Date | string) => {
@@ -216,72 +179,8 @@ export default function SearchResults({
               * La fecha mostrada es el registro en BDNS. Para fechas de cierre, consulta el portal oficial de cada convocatoria.
             </p>
           </div>
-          
-          {/* Budget Extraction Controls */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setShowBudgetButtons(!showBudgetButtons)}
-                className="btn-sm btn-outline flex items-center gap-2"
-              >
-                <CurrencyDollarIcon className="h-4 w-4" />
-                {showBudgetButtons ? 'Ocultar presupuestos' : 'Mostrar presupuestos'}
-              </button>
-              
-              {showBudgetButtons && (
-                <button
-                  onClick={handleExtractAllBudgets}
-                  disabled={loading}
-                  className="btn-sm btn-primary flex items-center gap-2"
-                  title={`Extraer presupuestos de ${data.length} convocatorias (puede tardar varios minutos)`}
-                >
-                  {loading ? (
-                    <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CurrencyDollarIcon className="h-4 w-4" />
-                  )}
-                  {loading ? `Extrayendo...` : `Extraer todos (${data.length})`}
-                </button>
-              )}
-            </div>
-          </div>
         </div>
-        
-        {/* Error Display */}
-        {error && (
-          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
-            <div className="flex justify-between items-center">
-              <p className="text-sm text-red-700">{error}</p>
-              <button
-                onClick={clearError}
-                className="text-red-500 hover:text-red-700"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        )}
       </div>
-      
-      {/* Budget Extraction Info */}
-      {showBudgetButtons && (
-        <div className="card p-4 bg-blue-50 border-blue-200">
-          <div className="flex items-start space-x-3">
-            <CurrencyDollarIcon className="h-5 w-5 text-blue-500 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-medium text-blue-900">Extracción de presupuestos</h3>
-              <p className="text-xs text-blue-700 mt-1">
-                Esta función extrae el presupuesto real ("Presupuesto total de la convocatoria") 
-                directamente de las páginas oficiales de BDNS. El proceso puede tardar unos segundos por convocatoria.
-              </p>
-              <p className="text-xs text-blue-600 mt-1">
-                💡 Usa "Extraer todos" para obtener presupuestos de todas las convocatorias visibles, 
-                o haz clic en "Presupuesto" en cada convocatoria individual.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
       
       {/* Sorting Controls */}
       <div className="card p-4">
@@ -344,26 +243,9 @@ export default function SearchResults({
                       )}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <CurrencyEuroIcon className="h-4 w-4 mr-1" />
-                      <span>{formatCurrency(convocatoria.importeTotal, convocatoria.identificador)}</span>
-                    </div>
-                    {showBudgetButtons && (
-                      <button
-                        onClick={() => handleExtractBudget(convocatoria.identificador)}
-                        disabled={isExtracting(convocatoria.identificador)}
-                        className="btn-sm btn-outline text-xs flex items-center gap-1"
-                        title="Extraer presupuesto real de la página oficial"
-                      >
-                        {isExtracting(convocatoria.identificador) ? (
-                          <ArrowPathIcon className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <CurrencyDollarIcon className="h-3 w-3" />
-                        )}
-                        {isExtracting(convocatoria.identificador) ? 'Extrayendo...' : 'Presupuesto'}
-                      </button>
-                    )}
+                  <div className="flex items-center">
+                    <CurrencyEuroIcon className="h-4 w-4 mr-1" />
+                    <span>{formatCurrency(convocatoria.importeTotal)}</span>
                   </div>
                 </div>
                 

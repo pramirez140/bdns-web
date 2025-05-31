@@ -6,8 +6,10 @@ const { Pool } = require('pg');
 // Configuration
 const BDNS_API_BASE = 'https://www.infosubvenciones.es/bdnstrans';
 const BATCH_SIZE = 100; // Records per API call
-const MAX_CONCURRENT_REQUESTS = 3; // Limit concurrent API calls
-const DELAY_BETWEEN_REQUESTS = 200; // ms delay between requests
+const MAX_CONCURRENT_REQUESTS = 2; // Limit concurrent API calls
+const DELAY_BETWEEN_REQUESTS = 500; // ms delay between requests
+const MAX_RETRIES = 3; // Maximum retry attempts per request
+const RETRY_DELAY = 2000; // ms delay between retries
 
 // Database connection
 const pool = new Pool({
@@ -24,8 +26,12 @@ class BDNSDataSynchronizer {
     this.processedRecords = 0;
     this.newRecords = 0;
     this.updatedRecords = 0;
+    this.actualChanges = 0;      // Records with real changes (newer fecha_mod)
+    this.touchedRecords = 0;     // Records with no changes (just touched)
     this.errors = [];
     this.startTime = Date.now();
+    this.consecutiveFailures = 0;
+    this.maxConsecutiveFailures = 10; // Circuit breaker threshold
   }
 
   async run(fullSync = false, completeMigration = false) {
@@ -43,7 +49,7 @@ class BDNSDataSynchronizer {
     
     try {
       // Initialize sync tracking
-      const syncType = completeMigration ? 'complete' : fullSync;
+      const syncType = completeMigration ? 'complete' : (fullSync ? 'full' : 'incremental');
       await this.initializeSync(syncType);
       
       // Get date range for sync
@@ -79,8 +85,7 @@ class BDNSDataSynchronizer {
     }
   }
 
-  async initializeSync(fullSync) {
-    const syncType = fullSync ? 'full' : 'incremental';
+  async initializeSync(syncType) {
     const query = `
       INSERT INTO sync_status (sync_type, started_at, sync_parameters)
       VALUES ($1, NOW(), $2)
@@ -89,12 +94,12 @@ class BDNSDataSynchronizer {
     const params = {
       batch_size: BATCH_SIZE,
       max_concurrent: MAX_CONCURRENT_REQUESTS,
-      full_sync: fullSync
+      sync_type: syncType
     };
     
     const result = await pool.query(query, [syncType, JSON.stringify(params)]);
     this.syncId = result.rows[0].id;
-    console.log(`📝 Sync initialized with ID: ${this.syncId}`);
+    console.log(`📝 Sync initialized with ID: ${this.syncId} (type: ${syncType})`);
   }
 
   async getDateRange(fullSync, completeMigration = false) {
@@ -106,17 +111,32 @@ class BDNSDataSynchronizer {
         hasta: `31/12/${currentYear + 1}`
       };
     } else if (fullSync) {
-      // Regular full sync: get recent data from 2023 to next year
+      // Regular full sync: focus on current year data (optimized for relevance)
       const currentYear = new Date().getFullYear();
       return {
-        desde: '01/01/2023',
-        hasta: `31/12/${currentYear + 1}`
+        desde: `01/01/${currentYear}`,  // Only current year
+        hasta: `31/12/${currentYear}`
       };
     } else {
-      // Incremental sync: get data from last sync date
+      // Incremental sync: get data from last sync date (last 7 days max)
       const query = "SELECT config_value FROM search_config WHERE config_key = 'last_full_sync'";
       const result = await pool.query(query);
-      const lastSync = new Date(result.rows[0].config_value);
+      let lastSync;
+      
+      if (result.rows.length > 0 && result.rows[0].config_value) {
+        lastSync = new Date(result.rows[0].config_value);
+        // Limit incremental to max 7 days to avoid large syncs
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        if (lastSync < sevenDaysAgo) {
+          lastSync = sevenDaysAgo;
+        }
+      } else {
+        // If no last sync, get last 3 days
+        lastSync = new Date();
+        lastSync.setDate(lastSync.getDate() - 3);
+      }
+      
       const today = new Date();
       
       return {
@@ -159,6 +179,9 @@ class BDNSDataSynchronizer {
         try {
           await this.syncPage(page, dateRange);
           
+          // Reset consecutive failures on success
+          this.consecutiveFailures = 0;
+          
           // Update progress
           this.processedPages++;
           if (this.processedPages % 10 === 0 || this.processedPages === this.totalPages) {
@@ -169,6 +192,14 @@ class BDNSDataSynchronizer {
         } catch (error) {
           console.error(`❌ Error syncing page ${page}:`, error.message);
           this.errors.push({ page, error: error.message });
+          this.consecutiveFailures++;
+          
+          // Circuit breaker: if too many consecutive failures, wait longer
+          if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
+            console.log(`⚠️ Circuit breaker activated after ${this.consecutiveFailures} consecutive failures. Waiting 30 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 30000));
+            this.consecutiveFailures = 0; // Reset after wait
+          }
         } finally {
           release();
         }
@@ -233,19 +264,105 @@ class BDNSDataSynchronizer {
       'fecha-hasta': dateRange.hasta
     };
 
-    const response = await axios.get(url, {
-      params,
-      timeout: 10000,
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'BDNS-Sync-Service/1.0'
-      }
-    });
+    return await this.makeAPIRequestWithRetry(url, params, MAX_RETRIES);
+  }
 
-    return response.data;
+  async makeAPIRequestWithRetry(url, params, maxRetries) {
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[SYNC] 🔄 API request attempt ${attempt}/${maxRetries} for page ${params.page}`);
+        
+        const response = await axios.get(url, {
+          params,
+          timeout: 30000, // Increased timeout to 30 seconds
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'BDNS-Sync-Service/1.0'
+          }
+        });
+
+        // Success - return data
+        if (attempt > 1) {
+          console.log(`[SYNC] ✅ Success on attempt ${attempt} for page ${params.page}`);
+        }
+        return response.data;
+
+      } catch (error) {
+        lastError = error;
+        const isTimeout = error.code === 'ECONNABORTED' || error.message.includes('timeout');
+        const isNetworkError = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND';
+        
+        console.log(`[SYNC ERROR] ❌ Failed to sync page ${params.page}: ${error.message}`);
+        
+        if (attempt < maxRetries && (isTimeout || isNetworkError || error.response?.status >= 500)) {
+          console.log(`[SYNC] 🔄 Retrying in ${RETRY_DELAY}ms... (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          continue;
+        }
+        
+        // If we've exhausted retries or got a non-retryable error, break
+        break;
+      }
+    }
+    
+    // All retries failed
+    throw new Error(`Failed after ${maxRetries} attempts: ${lastError.message}`);
   }
 
   async upsertConvocatoria(convocatoria) {
+    const codigoBdns = convocatoria['codigo-BDNS'];
+    const newFechaMod = this.parseDate(convocatoria['fecha-mod']);
+    
+    // First, check if record exists and get current fecha_mod
+    const existingQuery = `
+      SELECT fecha_mod, last_synced_at
+      FROM convocatorias 
+      WHERE codigo_bdns = $1
+    `;
+    
+    try {
+      const existingResult = await pool.query(existingQuery, [codigoBdns]);
+      
+      if (existingResult.rows.length === 0) {
+        // New record - INSERT
+        await this.insertNewRecord(convocatoria);
+        this.newRecords++;
+        return { action: 'inserted', hasChanges: true, reason: 'new_record' };
+        
+      } else {
+        const existing = existingResult.rows[0];
+        const existingFechaMod = existing.fecha_mod;
+        
+        // Compare modification dates
+        if (!newFechaMod || !existingFechaMod) {
+          // Can't compare dates - assume change and update
+          await this.updateExistingRecord(convocatoria);
+          this.updatedRecords++;
+          this.actualChanges++;
+          return { action: 'updated', hasChanges: true, reason: 'missing_date' };
+          
+        } else if (newFechaMod > existingFechaMod) {
+          // API has newer modification date - real change detected
+          await this.updateExistingRecord(convocatoria);
+          this.updatedRecords++;
+          this.actualChanges++;
+          return { action: 'updated', hasChanges: true, reason: 'newer_modification' };
+          
+        } else {
+          // No change detected - just touch last_synced_at
+          await this.touchRecord(codigoBdns);
+          this.touchedRecords++;
+          return { action: 'touched', hasChanges: false, reason: 'no_change' };
+        }
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async insertNewRecord(convocatoria) {
     const query = `
       INSERT INTO convocatorias (
         codigo_bdns, titulo, titulo_cooficial, desc_organo, dir3_organo,
@@ -253,35 +370,12 @@ class BDNSDataSynchronizer {
         abierto, region, financiacion, importe_total,
         finalidad, instrumento, sector, tipo_beneficiario,
         descripcion_br, url_esp_br, fondo_ue,
-        permalink_convocatoria, permalink_concesiones
+        permalink_convocatoria, permalink_concesiones,
+        created_at, updated_at, last_synced_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+        NOW(), NOW(), NOW()
       )
-      ON CONFLICT (codigo_bdns) 
-      DO UPDATE SET
-        titulo = EXCLUDED.titulo,
-        titulo_cooficial = EXCLUDED.titulo_cooficial,
-        desc_organo = EXCLUDED.desc_organo,
-        dir3_organo = EXCLUDED.dir3_organo,
-        fecha_mod = EXCLUDED.fecha_mod,
-        inicio_solicitud = EXCLUDED.inicio_solicitud,
-        fin_solicitud = EXCLUDED.fin_solicitud,
-        abierto = EXCLUDED.abierto,
-        region = EXCLUDED.region,
-        financiacion = EXCLUDED.financiacion,
-        importe_total = EXCLUDED.importe_total,
-        finalidad = EXCLUDED.finalidad,
-        instrumento = EXCLUDED.instrumento,
-        sector = EXCLUDED.sector,
-        tipo_beneficiario = EXCLUDED.tipo_beneficiario,
-        descripcion_br = EXCLUDED.descripcion_br,
-        url_esp_br = EXCLUDED.url_esp_br,
-        fondo_ue = EXCLUDED.fondo_ue,
-        permalink_convocatoria = EXCLUDED.permalink_convocatoria,
-        permalink_concesiones = EXCLUDED.permalink_concesiones,
-        updated_at = NOW(),
-        last_synced_at = NOW()
-      RETURNING (xmax = 0) AS inserted
     `;
 
     const values = [
@@ -295,7 +389,7 @@ class BDNSDataSynchronizer {
       this.parseDate(convocatoria['inicio-solicitud']),
       this.parseDate(convocatoria['fin-solicitud']),
       convocatoria.abierto || false,
-      JSON.stringify(convocatoria.region || []),
+      this.arrayToPostgresArray(convocatoria.region),
       JSON.stringify(convocatoria.financiacion || []),
       this.extractImporteTotal(convocatoria.financiacion),
       JSON.stringify(convocatoria.finalidad || {}),
@@ -309,17 +403,71 @@ class BDNSDataSynchronizer {
       convocatoria['permalink-concesiones'] || null
     ];
 
-    try {
-      const result = await pool.query(query, values);
-      if (result.rows[0].inserted) {
-        this.newRecords++;
-      } else {
-        this.updatedRecords++;
-      }
-    } catch (error) {
-      // Don't log full error details for common issues, just throw to be caught by caller
-      throw error;
-    }
+    await pool.query(query, values);
+  }
+
+  async updateExistingRecord(convocatoria) {
+    const query = `
+      UPDATE convocatorias SET
+        titulo = $2,
+        titulo_cooficial = $3,
+        desc_organo = $4,
+        dir3_organo = $5,
+        fecha_mod = $6,
+        inicio_solicitud = $7,
+        fin_solicitud = $8,
+        abierto = $9,
+        region = $10,
+        financiacion = $11,
+        importe_total = $12,
+        finalidad = $13,
+        instrumento = $14,
+        sector = $15,
+        tipo_beneficiario = $16,
+        descripcion_br = $17,
+        url_esp_br = $18,
+        fondo_ue = $19,
+        permalink_convocatoria = $20,
+        permalink_concesiones = $21,
+        updated_at = NOW(),
+        last_synced_at = NOW()
+      WHERE codigo_bdns = $1
+    `;
+
+    const values = [
+      convocatoria['codigo-BDNS'],
+      convocatoria.titulo || '',
+      convocatoria['titulo-cooficial'] || null,
+      convocatoria['desc-organo'] || '',
+      convocatoria['dir3-organo'] || null,
+      this.parseDate(convocatoria['fecha-mod']),
+      this.parseDate(convocatoria['inicio-solicitud']),
+      this.parseDate(convocatoria['fin-solicitud']),
+      convocatoria.abierto || false,
+      this.arrayToPostgresArray(convocatoria.region),
+      JSON.stringify(convocatoria.financiacion || []),
+      this.extractImporteTotal(convocatoria.financiacion),
+      JSON.stringify(convocatoria.finalidad || {}),
+      JSON.stringify(convocatoria.instrumento || []),
+      JSON.stringify(convocatoria.sector || []),
+      JSON.stringify(convocatoria['tipo-beneficiario'] || []),
+      convocatoria.descripcionBR || null,
+      convocatoria.URLespBR || null,
+      convocatoria.fondoUE || null,
+      convocatoria['permalink-convocatoria'] || null,
+      convocatoria['permalink-concesiones'] || null
+    ];
+
+    await pool.query(query, values);
+  }
+
+  async touchRecord(codigoBdns) {
+    const query = `
+      UPDATE convocatorias 
+      SET last_synced_at = NOW()
+      WHERE codigo_bdns = $1
+    `;
+    await pool.query(query, [codigoBdns]);
   }
 
   async updateProgress() {
@@ -341,7 +489,7 @@ class BDNSDataSynchronizer {
 
     if (status === 'completed') {
       await pool.query(
-        "UPDATE search_config SET config_value = NOW()::date::text WHERE config_key = 'last_full_sync'"
+        "UPDATE search_config SET config_value = (NOW() AT TIME ZONE 'Europe/Madrid')::timestamp::text WHERE config_key = 'last_full_sync'"
       );
     }
   }
@@ -351,26 +499,47 @@ class BDNSDataSynchronizer {
     const pagesPerSecond = this.processedPages / (elapsed / 1000);
     const eta = this.totalPages > this.processedPages ? 
       (this.totalPages - this.processedPages) / pagesPerSecond : 0;
+    
+    const changeRate = this.processedRecords > 0 ? 
+      ((this.actualChanges / this.processedRecords) * 100).toFixed(1) : '0.0';
 
     console.log(`📊 Progress: ${this.processedPages}/${this.totalPages} pages ` +
                 `(${((this.processedPages / this.totalPages) * 100).toFixed(1)}%) | ` +
                 `Records: ${this.processedRecords.toLocaleString()} | ` +
+                `🆕 New: ${this.newRecords.toLocaleString()} | ` +
+                `🔄 Changed: ${this.actualChanges.toLocaleString()} (${changeRate}%) | ` +
+                `👆 Touched: ${this.touchedRecords.toLocaleString()} | ` +
                 `Speed: ${pagesPerSecond.toFixed(1)} pages/s | ` +
                 `ETA: ${this.formatDuration(eta * 1000)}`);
   }
 
   printSummary() {
     const elapsed = Date.now() - this.startTime;
+    const changeRate = this.processedRecords > 0 ? 
+      ((this.actualChanges / this.processedRecords) * 100).toFixed(1) : '0.0';
+    const efficiencyGain = this.processedRecords > 0 ? 
+      ((this.touchedRecords / this.processedRecords) * 100).toFixed(1) : '0.0';
     
     console.log('\n🎉 Synchronization Complete!');
     console.log('=====================================');
     console.log(`📊 Total Pages: ${this.processedPages.toLocaleString()}`);
     console.log(`📊 Total Records: ${this.processedRecords.toLocaleString()}`);
-    console.log(`📊 New Records: ${this.newRecords.toLocaleString()}`);
-    console.log(`📊 Updated Records: ${this.updatedRecords.toLocaleString()}`);
+    console.log(`🆕 New Records: ${this.newRecords.toLocaleString()}`);
+    console.log(`📝 Updated Records: ${this.updatedRecords.toLocaleString()}`);
+    console.log(`🔄 Actual Changes: ${this.actualChanges.toLocaleString()} (${changeRate}% of processed)`);
+    console.log(`👆 Touched (No Changes): ${this.touchedRecords.toLocaleString()} (${efficiencyGain}% efficiency gain)`);
     console.log(`📊 Errors: ${this.errors.length}`);
     console.log(`⏱️ Duration: ${this.formatDuration(elapsed)}`);
     console.log(`⚡ Speed: ${(this.processedRecords / (elapsed / 1000)).toFixed(1)} records/s`);
+    
+    // Change detection insights
+    console.log('\n📈 Change Detection Analysis:');
+    if (this.actualChanges > 0) {
+      console.log(`✅ Real changes detected: ${this.actualChanges.toLocaleString()} records had newer modification dates`);
+    }
+    if (this.touchedRecords > 0) {
+      console.log(`⚡ Efficiency gained: Skipped ${this.touchedRecords.toLocaleString()} unnecessary updates (${efficiencyGain}% reduction)`);
+    }
     
     if (this.errors.length > 0) {
       console.log('\n❌ Errors encountered:');
@@ -469,8 +638,19 @@ class BDNSDataSynchronizer {
       return null;
     }
     
-    // For JSONB array columns, return as JSON string
-    return JSON.stringify(arr);
+    // Format as PostgreSQL array literal: {value1,value2,value3}
+    // Escape quotes and backslashes in values
+    const escapedValues = arr.map(value => {
+      if (value === null || value === undefined) {
+        return 'NULL';
+      }
+      // Convert to string and escape quotes and backslashes
+      const str = String(value);
+      const escaped = str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      return `"${escaped}"`;
+    });
+    
+    return `{${escapedValues.join(',')}}`;
   }
 
   extractImporteTotal(financiacion) {

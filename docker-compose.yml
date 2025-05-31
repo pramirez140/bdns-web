@@ -11,12 +11,15 @@ services:
       - DATABASE_URL=postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
     volumes:
       - ./data:/app/data
+      # Development: mount source code for hot reload (comment out for production)
+      - ./src:/app/src
+      - ./scripts:/app/scripts
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import SearchForm from '@/components/search/SearchForm';
 import SearchResults from '@/components/search/SearchResults';
 import FilterPanel from '@/components/filters/FilterPanel';
 import { SyncManager } from '@/components/sync/SyncManager';
 import { SearchFilters, SearchParams, SearchResult, ConvocatoriaData } from '@/types/bdns';
+import { useTabState, useSearchState } from '@/hooks/useUrlState';
+
 // Helper function to call our API endpoint
 const callSearchAPI = async (filters: SearchFilters, params: SearchParams): Promise<SearchResult<ConvocatoriaData>> => {
   const searchParams = new URLSearchParams();
@@ -37,33 +39,42 @@ const callSearchAPI = async (filters: SearchFilters, params: SearchParams): Prom
 };
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<'search' | 'sync'>('search');
+  // URL state management
+  const { activeTab, setActiveTab } = useTabState();
+  const { 
+    currentFilters, 
+    currentParams, 
+    updateSearch, 
+    updateSearchWithReset, 
+    clearSearch 
+  } = useSearchState();
+  
+  // Component state
   const [searchResults, setSearchResults] = useState<SearchResult<ConvocatoriaData> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentFilters, setCurrentFilters] = useState<SearchFilters>({});
-  const [searchParams, setSearchParams] = useState<SearchParams>({
-    page: 1,
-    pageSize: 20,
-    sortBy: 'fechaPublicacion',
-    sortOrder: 'desc'
-  });
+  const [hasInitialLoad, setHasInitialLoad] = useState(false);
 
-  const handleSearch = async (query?: string, filters?: SearchFilters) => {
+  // Perform search with current URL state
+  const performSearch = async (filters?: SearchFilters, params?: SearchParams) => {
+    const searchFilters = filters || currentFilters;
+    const searchParams = params || currentParams;
+    
+    // Only search if there are actual search criteria
+    if (!searchFilters.query && !searchFilters.organoConvocante && !searchFilters.importeMinimo && 
+        !searchFilters.importeMaximo && !searchFilters.fechaConvocatoria && !searchFilters.estadoConvocatoria) {
+      return;
+    }
+
     setLoading(true);
     setError(null);
     
     try {
-      const searchFilters = { ...currentFilters, ...filters };
-      const params = { ...searchParams, query, page: 1 }; // Reset to first page on new search
-      
-      console.log('🔍 Frontend calling API with:', { searchFilters, params });
-      const results = await callSearchAPI(searchFilters, params);
+      console.log('🔍 Frontend calling API with:', { searchFilters, searchParams });
+      const results = await callSearchAPI(searchFilters, searchParams);
       console.log('✅ Frontend received results:', { total: results.total, count: results.data.length });
       
       setSearchResults(results);
-      setCurrentFilters(searchFilters);
-      setSearchParams(params);
     } catch (err: any) {
       console.error('Search error details:', err);
       setError(`Error: ${err.message || 'Error desconocido'}. Ver consola para más detalles.`);
@@ -72,38 +83,80 @@ export default function HomePage() {
     }
   };
 
+  // Load initial state from URL on mount
+  useEffect(() => {
+    if (!hasInitialLoad) {
+      setHasInitialLoad(true);
+      
+      // If URL has search parameters, perform search
+      if (currentFilters.query || currentFilters.organoConvocante || 
+          currentFilters.importeMinimo || currentFilters.importeMaximo ||
+          currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria) {
+        performSearch();
+      }
+    }
+  }, [hasInitialLoad, currentFilters, currentParams]);
+
+  // Handle new search from form
+  const handleSearch = async (query?: string, filters?: SearchFilters) => {
+    const newFilters = { ...currentFilters, ...filters };
+    if (query !== undefined) {
+      newFilters.query = query;
+    }
+    
+    const newParams = { ...currentParams, page: 1 }; // Reset to first page
+    
+    // Update URL state
+    updateSearchWithReset(newFilters, newParams);
+    
+    // Perform search
+    await performSearch(newFilters, newParams);
+  };
+
+  // Handle filter changes
   const handleFilterChange = (filters: SearchFilters) => {
-    handleSearch(searchParams.query, filters);
+    const newFilters = { ...currentFilters, ...filters };
+    const newParams = { ...currentParams, page: 1 }; // Reset to first page
+    
+    // Update URL state
+    updateSearchWithReset(newFilters, newParams);
+    
+    // Perform search
+    performSearch(newFilters, newParams);
   };
 
+  // Handle page changes
   const handlePageChange = async (page: number) => {
-    setLoading(true);
-    try {
-      const params = { ...searchParams, page };
-      const results = await callSearchAPI(currentFilters, params);
-      setSearchResults(results);
-      setSearchParams(params);
-    } catch (err: any) {
-      console.error('Page change error:', err);
-      setError(`Error al cargar página: ${err.message || 'Error desconocido'}`);
-    } finally {
-      setLoading(false);
-    }
+    const newParams = { ...currentParams, page };
+    
+    // Update URL state
+    updateSearch({}, newParams);
+    
+    // Perform search
+    await performSearch(currentFilters, newParams);
   };
 
+  // Handle sort changes
   const handleSortChange = async (sortBy: string, sortOrder: 'asc' | 'desc') => {
-    setLoading(true);
-    try {
-      const params = { ...searchParams, sortBy, sortOrder, page: 1 };
-      const results = await callSearchAPI(currentFilters, params);
-      setSearchResults(results);
-      setSearchParams(params);
-    } catch (err: any) {
-      console.error('Sort change error:', err);
-      setError(`Error al ordenar: ${err.message || 'Error desconocido'}`);
-    } finally {
-      setLoading(false);
-    }
+    const newParams = { ...currentParams, sortBy, sortOrder, page: 1 }; // Reset to first page
+    
+    // Update URL state
+    updateSearch({}, newParams);
+    
+    // Perform search
+    await performSearch(currentFilters, newParams);
+  };
+
+  // Handle tab change
+  const handleTabChange = (tab: 'search' | 'sync') => {
+    setActiveTab(tab);
+  };
+
+  // Handle clear search
+  const handleClearSearch = () => {
+    clearSearch();
+    setSearchResults(null);
+    setError(null);
   };
 
   return (
@@ -122,7 +175,7 @@ export default function HomePage() {
         {/* Tab Navigation */}
         <div className="flex border-b border-gray-200 mb-6">
           <button
-            onClick={() => setActiveTab('search')}
+            onClick={() => handleTabChange('search')}
             className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'search'
                 ? 'border-blue-500 text-blue-600'
@@ -132,7 +185,7 @@ export default function HomePage() {
             🔍 Buscar Subvenciones
           </button>
           <button
-            onClick={() => setActiveTab('sync')}
+            onClick={() => handleTabChange('sync')}
             className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'sync'
                 ? 'border-blue-500 text-blue-600'
@@ -145,11 +198,25 @@ export default function HomePage() {
 
         {/* Tab Content */}
         {activeTab === 'search' && (
-          <SearchForm 
-            onSearch={handleSearch}
-            loading={loading}
-            initialQuery={searchParams.query}
-          />
+          <div>
+            <SearchForm 
+              onSearch={handleSearch}
+              loading={loading}
+              initialQuery={currentParams.query}
+            />
+            
+            {/* Clear Search Button */}
+            {(currentFilters.query || searchResults) && (
+              <div className="mt-4 text-center">
+                <button
+                  onClick={handleClearSearch}
+                  className="text-sm text-gray-500 hover:text-gray-700 underline"
+                >
+                  Limpiar búsqueda
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {activeTab === 'sync' && (
@@ -162,7 +229,7 @@ export default function HomePage() {
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card p-4">
-          <div className="text-2xl font-bold text-bdns-blue">332.545+</div>
+          <div className="text-2xl font-bold text-bdns-blue">562.536+</div>
           <div className="text-sm text-gray-600">Convocatorias BDNS</div>
         </div>
         <div className="card p-4">
@@ -174,8 +241,8 @@ export default function HomePage() {
           <div className="text-sm text-gray-600">Conexión Directa</div>
         </div>
         <div className="card p-4">
-          <div className="text-2xl font-bold text-gray-600">66.509+</div>
-          <div className="text-sm text-gray-600">Páginas Totales</div>
+          <div className="text-2xl font-bold text-gray-600">€882B+</div>
+          <div className="text-sm text-gray-600">Valor Total</div>
         </div>
       </div>
 
@@ -223,8 +290,8 @@ export default function HomePage() {
                 onPageChange={handlePageChange}
                 onSortChange={handleSortChange}
                 currentSort={{
-                  sortBy: searchParams.sortBy || 'fechaPublicacion',
-                  sortOrder: searchParams.sortOrder || 'desc'
+                  sortBy: currentParams.sortBy || 'fechaPublicacion',
+                  sortOrder: currentParams.sortOrder || 'desc'
                 }}
               />
             )}

@@ -18,31 +18,20 @@ interface FilterPanelProps {
 }
 
 export default function FilterPanel({ filters, onFilterChange, loading = false }: FilterPanelProps) {
-  const [localFilters, setLocalFilters] = useState<SearchFilters>(filters);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  useEffect(() => {
-    setLocalFilters(filters);
-  }, [filters]);
-
   const handleFilterUpdate = (key: keyof SearchFilters, value: any) => {
-    const updatedFilters = { ...localFilters, [key]: value };
-    setLocalFilters(updatedFilters);
-  };
-
-  const applyFilters = () => {
-    onFilterChange(localFilters);
+    const updatedFilters = { ...filters, [key]: value };
+    onFilterChange(updatedFilters);
   };
 
   const clearFilters = () => {
-    const emptyFilters: SearchFilters = {};
-    setLocalFilters(emptyFilters);
-    onFilterChange(emptyFilters);
+    onFilterChange({});
   };
 
-  const hasActiveFilters = Object.keys(localFilters).some(key => 
-    localFilters[key as keyof SearchFilters] !== undefined && 
-    localFilters[key as keyof SearchFilters] !== ''
+  const hasActiveFilters = Object.keys(filters).some(key => 
+    filters[key as keyof SearchFilters] !== undefined && 
+    filters[key as keyof SearchFilters] !== ''
   );
 
   // Predefined options (in a real app, these would come from the API)
@@ -150,7 +139,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               Organismo Convocante
             </label>
             <select
-              value={localFilters.organoConvocante || ''}
+              value={filters.organoConvocante || ''}
               onChange={(e) => handleFilterUpdate('organoConvocante', e.target.value || undefined)}
               className="form-select"
               disabled={loading}
@@ -168,7 +157,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
           <div>
             <label className="form-label">Tipo de Entidad</label>
             <select
-              value={localFilters.tipoEntidad || ''}
+              value={filters.tipoEntidad || ''}
               onChange={(e) => handleFilterUpdate('tipoEntidad', e.target.value || undefined)}
               className="form-select"
               disabled={loading}
@@ -187,7 +176,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
           <div>
             <label className="form-label">Materia</label>
             <select
-              value={localFilters.materiaSubvencion || ''}
+              value={filters.materiaSubvencion || ''}
               onChange={(e) => handleFilterUpdate('materiaSubvencion', e.target.value || undefined)}
               className="form-select"
               disabled={loading}
@@ -208,7 +197,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               Comunidad Autónoma
             </label>
             <select
-              value={localFilters.ubicacionGeografica || ''}
+              value={filters.ubicacionGeografica || ''}
               onChange={(e) => handleFilterUpdate('ubicacionGeografica', e.target.value || undefined)}
               className="form-select"
               disabled={loading}
@@ -232,7 +221,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               <input
                 type="number"
                 placeholder="Desde (€)"
-                value={localFilters.importeMinimo || ''}
+                value={filters.importeMinimo || ''}
                 onChange={(e) => handleFilterUpdate('importeMinimo', e.target.value ? Number(e.target.value) : undefined)}
                 className="form-input"
                 disabled={loading}
@@ -240,7 +229,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               <input
                 type="number"
                 placeholder="Hasta (€)"
-                value={localFilters.importeMaximo || ''}
+                value={filters.importeMaximo || ''}
                 onChange={(e) => handleFilterUpdate('importeMaximo', e.target.value ? Number(e.target.value) : undefined)}
                 className="form-input"
                 disabled={loading}
@@ -273,10 +262,10 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               <input
                 type="date"
                 placeholder="Fecha desde"
-                value={localFilters.fechaConvocatoria?.desde ? 
-                  localFilters.fechaConvocatoria.desde.toISOString().split('T')[0] : ''}
+                value={filters.fechaConvocatoria?.desde ? 
+                  filters.fechaConvocatoria.desde.toISOString().split('T')[0] : ''}
                 onChange={(e) => {
-                  const fechaConvocatoria = localFilters.fechaConvocatoria || {};
+                  const fechaConvocatoria = filters.fechaConvocatoria || {};
                   handleFilterUpdate('fechaConvocatoria', {
                     ...fechaConvocatoria,
                     desde: e.target.value ? new Date(e.target.value) : undefined
@@ -288,10 +277,10 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
               <input
                 type="date"
                 placeholder="Fecha hasta"
-                value={localFilters.fechaConvocatoria?.hasta ? 
-                  localFilters.fechaConvocatoria.hasta.toISOString().split('T')[0] : ''}
+                value={filters.fechaConvocatoria?.hasta ? 
+                  filters.fechaConvocatoria.hasta.toISOString().split('T')[0] : ''}
                 onChange={(e) => {
-                  const fechaConvocatoria = localFilters.fechaConvocatoria || {};
+                  const fechaConvocatoria = filters.fechaConvocatoria || {};
                   handleFilterUpdate('fechaConvocatoria', {
                     ...fechaConvocatoria,
                     hasta: e.target.value ? new Date(e.target.value) : undefined
@@ -307,7 +296,7 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
           <div>
             <label className="form-label">Estado</label>
             <select
-              value={localFilters.estadoConvocatoria || ''}
+              value={filters.estadoConvocatoria || ''}
               onChange={(e) => handleFilterUpdate('estadoConvocatoria', e.target.value || undefined)}
               className="form-select"
               disabled={loading}
@@ -320,25 +309,18 @@ export default function FilterPanel({ filters, onFilterChange, loading = false }
             </select>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex space-x-2 pt-4 border-t border-gray-200">
-            <button
-              onClick={applyFilters}
-              disabled={loading}
-              className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Aplicando...' : 'Aplicar Filtros'}
-            </button>
-            {hasActiveFilters && (
+          {/* Clear Filters Button */}
+          {hasActiveFilters && (
+            <div className="pt-4 border-t border-gray-200">
               <button
                 onClick={clearFilters}
                 disabled={loading}
-                className="btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-outline w-full disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Limpiar
+                Limpiar Filtros
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

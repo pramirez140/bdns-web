@@ -6,6 +6,7 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: false,
   },
+  output: 'standalone',
   env: {
     BDNS_API_BASE_URL: process.env.BDNS_API_BASE_URL || 'https://www.infosubvenciones.es/bdnstrans',
   },
@@ -25,7 +26,7 @@ const nextConfig = {
     return [
       {
         source: '/api/bdns/:path*',
-        destination: `${process.env.BDNS_API_BASE_URL}/:path*`,
+        destination: 'https://www.infosubvenciones.es/bdnstrans/:path*',
       },
     ];
   },

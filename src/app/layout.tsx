@@ -32,22 +32,22 @@ export default function RootLayout({
                 </div>
                 <nav className="flex space-x-4">
                   <a 
-                    href="/" 
+                    href="/?tab=search" 
                     className="text-gray-700 hover:text-bdns-blue px-3 py-2 rounded-md text-sm font-medium"
                   >
                     Búsqueda
+                  </a>
+                  <a 
+                    href="/?tab=sync" 
+                    className="text-gray-700 hover:text-bdns-blue px-3 py-2 rounded-md text-sm font-medium"
+                  >
+                    Gestión de Datos
                   </a>
                   <a 
                     href="/expedientes" 
                     className="text-gray-700 hover:text-bdns-blue px-3 py-2 rounded-md text-sm font-medium"
                   >
                     Expedientes
-                  </a>
-                  <a 
-                    href="/estadisticas" 
-                    className="text-gray-700 hover:text-bdns-blue px-3 py-2 rounded-md text-sm font-medium"
-                  >
-                    Estadísticas
                   </a>
                 </nav>
               </div>

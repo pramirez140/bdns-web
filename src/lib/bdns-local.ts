@@ -35,8 +35,23 @@ export class BDNSLocalClient {
       const importeMax = filtros.importeMaximo;
       const soloAbiertas = filtros.estadoConvocatoria === 'abierta';
 
-      // Perform search
-      const results = await this.db.searchConvocatorias(
+      // Build sort clause
+      let sortClause = 'ORDER BY fecha_registro DESC'; // default sort
+      if (params.sortBy && params.sortOrder) {
+        const sortFieldMap: { [key: string]: string } = {
+          'fechaPublicacion': 'fecha_registro',
+          'importeTotal': 'importe_total', 
+          'titulo': 'titulo'
+        };
+        
+        const dbField = sortFieldMap[params.sortBy];
+        if (dbField) {
+          sortClause = `ORDER BY ${dbField} ${params.sortOrder.toUpperCase()}`;
+        }
+      }
+
+      // Perform search with sorting
+      const results = await this.db.searchConvocatoriasWithSort(
         searchTerm,
         organoFilter,
         fechaDesde,
@@ -45,7 +60,8 @@ export class BDNSLocalClient {
         importeMax,
         soloAbiertas,
         pageSize,
-        offset
+        offset,
+        sortClause
       );
 
       // Get total count for pagination

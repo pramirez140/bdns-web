@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
 
     // Get sync statistics from database
     const stats = await bdnsLocalClient.getSyncStatistics();
+    const latestSync = await bdnsLocalClient.getLatestSyncInfo();
 
     console.log('✅ Sync statistics retrieved:', stats);
 
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
       data: {
         database_stats: stats,
         last_sync: stats.ultima_sincronizacion,
+        latest_sync: latestSync,
         is_healthy: await bdnsLocalClient.isHealthy()
       },
       timestamp: new Date().toISOString()

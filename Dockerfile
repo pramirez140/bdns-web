@@ -1,34 +1,53 @@
-# Use Node.js 18 Alpine as base image
-FROM node:18-alpine
-
-# Set working directory
+# Multi-stage build for production
+FROM node:18-alpine AS base
 WORKDIR /app
+RUN apk add --no-cache libc6-compat
 
-# Copy package files
+# Dependencies
+FROM base AS deps
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy application code
+# Development stage
+FROM base AS development
+COPY package*.json ./
+RUN npm ci
 COPY . .
+EXPOSE 3000
+CMD ["npm", "run", "dev"]
 
-# Build the application
+# Build stage
+FROM base AS builder
+COPY package*.json ./
+RUN npm ci
+COPY . .
 RUN npm run build
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
-
-# Change ownership of the app directory
-RUN chown -R nextjs:nodejs /app
-USER nextjs
-
-# Expose port
-EXPOSE 3000
-
-# Set environment to production
+# Production stage
+FROM base AS production
 ENV NODE_ENV=production
 
-# Start the application
-CMD ["npm", "start"]
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copy dependencies first
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+
+# Copy built application
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy scripts and other necessary files
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+
+# Give full permissions (world writable)
+RUN chmod -R 777 /app
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

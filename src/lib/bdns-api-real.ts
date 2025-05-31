@@ -17,7 +17,7 @@ export class BDNSRealApiClient {
     this.baseUrl = baseUrl;
     this.api = axios.create({
       baseURL: baseUrl,
-      timeout: 30000,
+      timeout: 60000,
       headers: {
         'Accept': 'application/json, text/html, */*',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -70,7 +70,7 @@ export class BDNSRealApiClient {
       
       const response = await this.api.get(endpoint, {
         params: queryParams,
-        timeout: 10000,
+        timeout: 30000,
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -122,7 +122,7 @@ export class BDNSRealApiClient {
       
       const response = await this.api.get(endpoint, {
         params: queryParams,
-        timeout: 8000,
+        timeout: 20000,
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
@@ -158,7 +158,7 @@ export class BDNSRealApiClient {
             
             const response2 = await this.api.get(endpoint, {
               params: queryParams2,
-              timeout: 5000,
+              timeout: 15000,
               headers: {
                 'Accept': 'application/json',
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
