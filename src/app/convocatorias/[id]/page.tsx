@@ -37,34 +37,34 @@ export default function ConvocatoriaDetailPage({ params }: { params: { id: strin
       returnUrl = `/?${searchQuery}`;
     } else if (searchState.filters || searchState.params) {
       // Fall back to cached search state if no URL parameters
-      const params = new URLSearchParams();
+      const urlParams = new URLSearchParams();
       
-      if (searchState.filters.query) params.append('q', searchState.filters.query);
+      if (searchState.filters.query) urlParams.append('q', searchState.filters.query);
       if (searchState.filters.organoConvocante) {
         if (Array.isArray(searchState.filters.organoConvocante)) {
-          params.append('organo', searchState.filters.organoConvocante.join(','));
+          urlParams.append('organo', searchState.filters.organoConvocante.join(','));
         } else {
-          params.append('organo', searchState.filters.organoConvocante);
+          urlParams.append('organo', searchState.filters.organoConvocante);
         }
       }
-      if (searchState.filters.importeMinimo) params.append('importe_min', searchState.filters.importeMinimo.toString());
-      if (searchState.filters.importeMaximo) params.append('importe_max', searchState.filters.importeMaximo.toString());
+      if (searchState.filters.importeMinimo) urlParams.append('importe_min', searchState.filters.importeMinimo.toString());
+      if (searchState.filters.importeMaximo) urlParams.append('importe_max', searchState.filters.importeMaximo.toString());
       if (searchState.filters.fechaConvocatoria?.desde) {
         const fecha = searchState.filters.fechaConvocatoria.desde;
-        params.append('fecha_desde', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+        urlParams.append('fecha_desde', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
       }
       if (searchState.filters.fechaConvocatoria?.hasta) {
         const fecha = searchState.filters.fechaConvocatoria.hasta;
-        params.append('fecha_hasta', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
+        urlParams.append('fecha_hasta', fecha instanceof Date ? fecha.toISOString().split('T')[0] : fecha);
       }
-      if (searchState.filters.estadoConvocatoria) params.append('estado', searchState.filters.estadoConvocatoria);
+      if (searchState.filters.estadoConvocatoria) urlParams.append('estado', searchState.filters.estadoConvocatoria);
       
-      if (searchState.params.page) params.append('page', searchState.params.page.toString());
-      if (searchState.params.pageSize) params.append('pageSize', searchState.params.pageSize.toString());
-      if (searchState.params.sortBy) params.append('sortBy', searchState.params.sortBy);
-      if (searchState.params.sortOrder) params.append('sortOrder', searchState.params.sortOrder);
+      if (searchState.params.page) urlParams.append('page', searchState.params.page.toString());
+      if (searchState.params.pageSize) urlParams.append('pageSize', searchState.params.pageSize.toString());
+      if (searchState.params.sortBy) urlParams.append('sortBy', searchState.params.sortBy);
+      if (searchState.params.sortOrder) urlParams.append('sortOrder', searchState.params.sortOrder);
       
-      const queryString = params.toString();
+      const queryString = urlParams.toString();
       if (queryString) {
         returnUrl = `/?${queryString}&from=${params.id}`;
       }

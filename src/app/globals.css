@@ -3,6 +3,29 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 10% 3.9%;
+    --radius: 0.5rem;
+  }
+  
   html {
     font-family: 'Inter', system-ui, sans-serif;
   }
@@ -100,4 +123,85 @@
   .btn-outline {
     @apply bg-white text-gray-700 border-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
   }
+}
+
+/* Mejores estilos para TODOS los desplegables */
+
+/* Select components */
+[data-radix-select-content] {
+  background-color: white !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  z-index: 9999 !important;
+}
+
+[data-radix-select-item] {
+  color: #111827 !important;
+  background-color: white !important;
+  padding: 8px 12px !important;
+}
+
+[data-radix-select-item]:hover,
+[data-radix-select-item][data-highlighted] {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+[data-radix-select-trigger] {
+  background-color: white !important;
+  border: 1px solid #d1d5db !important;
+  color: #111827 !important;
+}
+
+[data-radix-select-trigger]:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+[data-radix-select-value] {
+  color: #111827 !important;
+}
+
+[data-placeholder] {
+  color: #6b7280 !important;
+}
+
+/* Dropdown Menu components (navbar) */
+[data-radix-dropdown-menu-content] {
+  background-color: white !important;
+  border: 1px solid #d1d5db !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  z-index: 9999 !important;
+  border-radius: 8px !important;
+  padding: 4px !important;
+}
+
+[data-radix-dropdown-menu-item] {
+  color: #111827 !important;
+  background-color: white !important;
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  margin: 2px !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+}
+
+[data-radix-dropdown-menu-item]:hover,
+[data-radix-dropdown-menu-item][data-highlighted] {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+[data-radix-dropdown-menu-label] {
+  color: #111827 !important;
+  background-color: white !important;
+  padding: 8px 12px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+}
+
+[data-radix-dropdown-menu-separator] {
+  background-color: #e5e7eb !important;
+  height: 1px !important;
+  margin: 4px 8px !important;
 }

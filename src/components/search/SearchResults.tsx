@@ -13,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import { useSearchPersistence } from '@/hooks/useSearchPersistence';
+import { FavoriteButton } from '@/components/ui/favorite-button';
 
 interface SearchResultsProps {
   results: SearchResult<ConvocatoriaData>;
@@ -239,15 +240,22 @@ export default function SearchResults({
           >
             <div className="flex items-start justify-between">
               <div className="flex-1 min-w-0">
-                <Link 
-                  href={`/convocatorias/${convocatoria.identificador}`}
-                  className="block hover:text-bdns-blue"
-                  onClick={() => handleGrantClick(convocatoria.identificador)}
-                >
-                  <h3 className="text-lg font-medium text-gray-900 mb-2 line-clamp-2">
-                    {convocatoria.titulo}
-                  </h3>
-                </Link>
+                <div className="flex items-start justify-between mb-2">
+                  <Link 
+                    href={`/convocatorias/${convocatoria.identificador}`}
+                    className="block hover:text-bdns-blue flex-1"
+                    onClick={() => handleGrantClick(convocatoria.identificador)}
+                  >
+                    <h3 className="text-lg font-medium text-gray-900 line-clamp-2">
+                      {convocatoria.titulo}
+                    </h3>
+                  </Link>
+                  <FavoriteButton 
+                    grantId={parseInt(convocatoria.identificador)} 
+                    className="ml-2 flex-shrink-0"
+                    size="sm"
+                  />
+                </div>
                 
                 <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
                   <div className="flex items-center">
@@ -314,8 +322,8 @@ export default function SearchResults({
                       const hasCierre = convocatoria.fechaCierre;
                       
                       if (hasApertura && hasCierre) {
-                        const apertura = new Date(convocatoria.fechaApertura);
-                        const cierre = new Date(convocatoria.fechaCierre);
+                        const apertura = new Date(convocatoria.fechaApertura!);
+                        const cierre = new Date(convocatoria.fechaCierre!);
                         
                         if (now < apertura) {
                           return <span className="badge-yellow">Próximamente</span>;
@@ -325,7 +333,7 @@ export default function SearchResults({
                           return <span className="badge-gray">Cerrada</span>;
                         }
                       } else if (hasCierre) {
-                        const cierre = new Date(convocatoria.fechaCierre);
+                        const cierre = new Date(convocatoria.fechaCierre!);
                         if (now <= cierre) {
                           return <span className="badge-green">Abierta</span>;
                         } else {

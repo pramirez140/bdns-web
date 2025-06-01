@@ -39,7 +39,7 @@ async function testBDNSAPI() {
       console.log(`  - Órgano: ${first.organoConvocante}`);
       console.log(`  - Importe: ${first.importeTotal}€`);
       console.log(`  - Fecha Publicación: ${first.fechaPublicacion.toLocaleDateString()}`);
-      console.log(`  - Fecha Cierre: ${first.fechaCierre.toLocaleDateString()}`);
+      console.log(`  - Fecha Cierre: ${first.fechaCierre ? first.fechaCierre.toLocaleDateString() : 'No especificada'}`);
       console.log(`  - Enlace: ${first.enlaceOficial}`);
     }
     

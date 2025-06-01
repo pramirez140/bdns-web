@@ -198,3 +198,130 @@ Dual search capability:
 - Rate limiting on BDNS API requires careful request management
 
 This system successfully handles massive datasets (500k+ records) with sophisticated sync mechanisms, real-time monitoring, and optimized search capabilities.
+
+## 📧 Sistema de Verificación de Email (Implementado - Mayo 2025)
+
+### Características del Sistema de Email
+
+- ✅ **Verificación de registro**: Email de bienvenida con token de verificación
+- ✅ **Cambio de email**: Proceso de verificación con código de 6 dígitos
+- ✅ **2FA (Two-Factor Authentication)**: Autenticación de dos factores por email
+- ✅ **Templates HTML**: Emails profesionales con diseño responsivo
+- ✅ **Resend functionality**: Capacidad de reenvío de emails de verificación
+- ✅ **Session sync**: Actualización automática del estado de verificación
+
+### Arquitectura del Sistema de Email
+
+#### Base de Datos
+```sql
+-- Tabla users con campos de verificación
+users:
+  - email_verified: boolean (estado de verificación)
+  - email_verification_token: varchar(255) (token único)
+  - two_factor_enabled: boolean (2FA habilitado)
+  - two_factor_email: boolean (2FA por email)
+
+-- Tabla para códigos 2FA
+two_factor_codes:
+  - user_id: uuid (referencia a users)
+  - code: varchar(6) (código de 6 dígitos)
+  - expires_at: timestamp (expiración en 10 minutos)
+  - used: boolean (si ya fue utilizado)
+```
+
+#### API Endpoints
+- `POST /api/auth/verify`: Verificar token de email
+- `POST /api/auth/resend-verification`: Reenviar email de verificación
+- `POST /api/auth/2fa`: Enviar código 2FA
+- `PUT /api/auth/2fa`: Verificar código 2FA
+- `PUT /api/profile/email`: Cambiar email con verificación
+
+#### Configuración SMTP
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=p.ramirez@malaga2025.org
+SMTP_PASSWORD=awwo wxzm xzsz aeix
+SMTP_FROM="BDNS Web" <no-reply@eype.es>
+```
+
+### Funcionalidades Implementadas
+
+#### 1. Verificación Automática de Estado
+- **Cache inteligente**: Consulta DB cada 30 segundos en desarrollo, 5 minutos en producción
+- **Session sync**: NextAuth actualiza automáticamente el estado de `emailVerified`
+- **UI responsiva**: Solo muestra alertas cuando el email NO está verificado
+
+#### 2. Templates de Email
+- **HTML responsivo**: Compatible con todos los clientes de email
+- **Títulos en blanco**: Optimizado para fondos oscuros/claros
+- **Códigos destacados**: Diseño visual para códigos de verificación
+- **Branding consistente**: Logo y colores de BDNS Web
+
+#### 3. Flujo de Verificación 2FA
+1. Usuario activa 2FA en perfil
+2. Al hacer login, sistema detecta 2FA habilitado
+3. Valida credenciales primero
+4. Envía código de 6 dígitos por email
+5. Usuario introduce código en formulario especial
+6. Completa el login tras verificación
+
+#### 4. Gestión de Sesiones
+```typescript
+// src/lib/auth.ts - Session callback optimizado
+session: {
+  // Verificación automática desde DB con cache
+  if (!token.emailVerifiedChecked || (now - token.emailVerifiedChecked) > cacheTime) {
+    const userResult = await pool.query('SELECT email_verified FROM users WHERE id = $1', [token.id])
+    token.emailVerified = userResult.rows[0].email_verified
+    token.emailVerifiedChecked = now
+  }
+}
+```
+
+### Archivos Clave del Sistema
+
+#### Frontend
+- `src/app/auth/verify/page.tsx`: Página de verificación con resend
+- `src/app/auth/signin/page.tsx`: Login con flujo 2FA
+- `src/app/profile/page.tsx`: Gestión de verificación en perfil
+
+#### Backend  
+- `src/lib/email.ts`: Funciones de envío de email (send2FACode, sendEmailChangeVerification)
+- `src/lib/auth.ts`: Configuración NextAuth con verificación automática
+- `src/app/api/auth/`: Endpoints de autenticación y verificación
+
+#### Base de Datos
+- `migrations/add-2fa-fields.sql`: Campos 2FA en tabla users
+- `migrations/add-verification-codes-table.sql`: Tabla para códigos temporales
+
+### Estado Actual del Sistema (Mayo 2025)
+- ✅ **Verificación funcional**: Sistema completo operativo
+- ✅ **UI optimizada**: Solo muestra alertas cuando es necesario
+- ✅ **Performance**: Cache inteligente para minimizar consultas DB
+- ✅ **Compatibilidad email**: Funciona en Gmail, Spark, Outlook, etc.
+- ✅ **Seguridad**: Códigos con expiración, tokens únicos, rate limiting
+
+### Troubleshooting Email Verification
+
+#### Problema: "Email verificado en DB pero UI muestra no verificado"
+**Solución**: 
+1. El sistema tiene cache de 30 segundos en desarrollo
+2. Esperar 30 segundos y recargar página
+3. El estado se actualiza automáticamente
+
+#### Problema: "Títulos de email no visibles"
+**Solución**: Implementado múltiples capas de compatibilidad
+```html
+<h1 style="color: #ffffff !important;">
+  <font color="#ffffff">
+    <span style="color: #ffffff !important;">BDNS Web</span>
+  </font>
+</h1>
+```
+
+#### Problema: "2FA no se activa en login"
+**Verificar**:
+1. User tiene `two_factor_enabled = true` y `two_factor_email = true`
+2. Credenciales son correctas (se validan antes de 2FA)
+3. Email SMTP configurado correctamente

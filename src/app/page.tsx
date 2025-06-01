@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import SearchForm from '@/components/search/SearchForm';
 import SearchResults from '@/components/search/SearchResults';
 import FilterPanel from '@/components/filters/FilterPanel';
@@ -184,11 +184,15 @@ function HomePage() {
   }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState, restoreScrollPosition]);
 
   // Save scroll position periodically
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>();
+  
   useEffect(() => {
     const handleScroll = () => {
       // Debounce scroll position saving
-      clearTimeout(window.scrollSaveTimeout);
-      window.scrollSaveTimeout = setTimeout(() => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      scrollTimeoutRef.current = setTimeout(() => {
         saveScrollPosition();
       }, 500);
     };
@@ -196,7 +200,9 @@ function HomePage() {
     window.addEventListener('scroll', handleScroll);
     return () => {
       window.removeEventListener('scroll', handleScroll);
-      clearTimeout(window.scrollSaveTimeout);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
     };
   }, [saveScrollPosition]);
 
