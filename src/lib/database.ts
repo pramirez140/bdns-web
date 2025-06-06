@@ -359,14 +359,27 @@ export class BDNSDatabase {
     // Build the main query with filtering and sorting
     let query = `
       SELECT 
-        codigo_bdns, titulo, titulo_cooficial, desc_organo, dir3_organo,
-        fecha_registro, fecha_mod, inicio_solicitud, fin_solicitud,
-        abierto, region, financiacion, importe_total,
-        finalidad, instrumento, sector, tipo_beneficiario,
-        descripcion_br, url_esp_br, fondo_ue,
-        permalink_convocatoria, permalink_concesiones,
-        created_at, updated_at, last_synced_at
+        c.bdns_code as codigo_bdns, 
+        c.title as titulo, 
+        c.title_co_official as titulo_cooficial, 
+        o.name as desc_organo,
+        c.registration_date as fecha_registro, 
+        c.modification_date as fecha_mod, 
+        c.application_start_date as inicio_solicitud, 
+        c.application_end_date as fin_solicitud,
+        c.is_open as abierto, 
+        c.total_amount as importe_total,
+        c.max_beneficiary_amount as importe_maximo_beneficiario,
+        c.description_br, 
+        c.url_esp_br, 
+        c.eu_fund as fondo_ue,
+        c.permalink_grant as permalink_convocatoria, 
+        c.permalink_awards as permalink_concesiones,
+        c.created_at, 
+        c.updated_at, 
+        c.last_synced_at
       FROM convocatorias c
+      JOIN organizations o ON c.organization_id = o.id
       WHERE 1=1
     `;
     
@@ -377,8 +390,8 @@ export class BDNSDatabase {
     if (searchTerm) {
       query += ` AND (
         c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
-        c.titulo ILIKE '%' || $${paramIndex} || '%' OR
-        c.desc_organo ILIKE '%' || $${paramIndex} || '%'
+        c.title ILIKE '%' || $${paramIndex} || '%' OR
+        o.name ILIKE '%' || $${paramIndex} || '%'
       )`;
       values.push(searchTerm);
       paramIndex++;
@@ -388,50 +401,50 @@ export class BDNSDatabase {
       if (Array.isArray(organoFilter) && organoFilter.length > 0) {
         if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
           // Use exact matches for expanded organisms
-          const organoConditions = expandedOrganoFilters.map((_, index) => `c.desc_organo = $${paramIndex + index}`);
+          const organoConditions = expandedOrganoFilters.map((_, index) => `o.name = $${paramIndex + index}`);
           query += ` AND (${organoConditions.join(' OR ')})`;
           expandedOrganoFilters.forEach(organo => values.push(organo));
           paramIndex += expandedOrganoFilters.length;
         } else {
           // For simple array terms, use ILIKE
-          const organoConditions = organoFilter.map((_, index) => `c.desc_organo ILIKE $${paramIndex + index}`);
+          const organoConditions = organoFilter.map((_, index) => `o.name ILIKE $${paramIndex + index}`);
           query += ` AND (${organoConditions.join(' OR ')})`;
           organoFilter.forEach(organo => values.push(`%${organo}%`));
           paramIndex += organoFilter.length;
         }
       } else if (typeof organoFilter === 'string') {
-        query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
+        query += ` AND o.name ILIKE '%' || $${paramIndex} || '%'`;
         values.push(organoFilter);
         paramIndex++;
       }
     }
 
     if (fechaDesde) {
-      query += ` AND c.fecha_registro >= $${paramIndex}`;
+      query += ` AND c.registration_date >= $${paramIndex}`;
       values.push(fechaDesde);
       paramIndex++;
     }
 
     if (fechaHasta) {
-      query += ` AND c.fecha_registro <= $${paramIndex}`;
+      query += ` AND c.registration_date <= $${paramIndex}`;
       values.push(fechaHasta);
       paramIndex++;
     }
 
     if (importeMin) {
-      query += ` AND c.importe_total >= $${paramIndex}`;
+      query += ` AND c.total_amount >= $${paramIndex}`;
       values.push(importeMin);
       paramIndex++;
     }
 
     if (importeMax) {
-      query += ` AND c.importe_total <= $${paramIndex}`;
+      query += ` AND c.total_amount <= $${paramIndex}`;
       values.push(importeMax);
       paramIndex++;
     }
 
     if (soloAbiertas) {
-      query += ` AND c.abierto = true`;
+      query += ` AND c.is_open = true`;
     }
 
     // Add sorting and pagination
@@ -469,6 +482,7 @@ export class BDNSDatabase {
     let query = `
       SELECT COUNT(*) as total
       FROM convocatorias c
+      JOIN organizations o ON c.organization_id = o.id
       WHERE 1=1
     `;
     
@@ -478,8 +492,8 @@ export class BDNSDatabase {
     if (searchTerm) {
       query += ` AND (
         c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
-        c.titulo ILIKE '%' || $${paramIndex} || '%' OR
-        c.desc_organo ILIKE '%' || $${paramIndex} || '%'
+        c.title ILIKE '%' || $${paramIndex} || '%' OR
+        o.name ILIKE '%' || $${paramIndex} || '%'
       )`;
       values.push(searchTerm);
       paramIndex++;
@@ -489,50 +503,50 @@ export class BDNSDatabase {
       if (Array.isArray(organoFilter) && organoFilter.length > 0) {
         if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
           // Use exact matches for expanded organisms
-          const organoConditions = expandedOrganoFilters.map((_, index) => `c.desc_organo = $${paramIndex + index}`);
+          const organoConditions = expandedOrganoFilters.map((_, index) => `o.name = $${paramIndex + index}`);
           query += ` AND (${organoConditions.join(' OR ')})`;
           expandedOrganoFilters.forEach(organo => values.push(organo));
           paramIndex += expandedOrganoFilters.length;
         } else {
           // For simple array terms, use ILIKE
-          const organoConditions = organoFilter.map((_, index) => `c.desc_organo ILIKE $${paramIndex + index}`);
+          const organoConditions = organoFilter.map((_, index) => `o.name ILIKE $${paramIndex + index}`);
           query += ` AND (${organoConditions.join(' OR ')})`;
           organoFilter.forEach(organo => values.push(`%${organo}%`));
           paramIndex += organoFilter.length;
         }
       } else if (typeof organoFilter === 'string') {
-        query += ` AND c.desc_organo ILIKE '%' || $${paramIndex} || '%'`;
+        query += ` AND o.name ILIKE '%' || $${paramIndex} || '%'`;
         values.push(organoFilter);
         paramIndex++;
       }
     }
 
     if (fechaDesde) {
-      query += ` AND c.fecha_registro >= $${paramIndex}`;
+      query += ` AND c.registration_date >= $${paramIndex}`;
       values.push(fechaDesde);
       paramIndex++;
     }
 
     if (fechaHasta) {
-      query += ` AND c.fecha_registro <= $${paramIndex}`;
+      query += ` AND c.registration_date <= $${paramIndex}`;
       values.push(fechaHasta);
       paramIndex++;
     }
 
     if (importeMin) {
-      query += ` AND c.importe_total >= $${paramIndex}`;
+      query += ` AND c.total_amount >= $${paramIndex}`;
       values.push(importeMin);
       paramIndex++;
     }
 
     if (importeMax) {
-      query += ` AND c.importe_total <= $${paramIndex}`;
+      query += ` AND c.total_amount <= $${paramIndex}`;
       values.push(importeMax);
       paramIndex++;
     }
 
     if (soloAbiertas) {
-      query += ` AND c.abierto = true`;
+      query += ` AND c.is_open = true`;
     }
 
     const result = await this.db.query(query, values);
@@ -546,7 +560,7 @@ export class BDNSDatabase {
       WITH quick_stats AS (
         SELECT 
           COUNT(*) as total_convocatorias,
-          COUNT(*) FILTER (WHERE abierto = true) as convocatorias_abiertas,
+          COUNT(*) FILTER (WHERE is_open = true) as convocatorias_abiertas,
           (SELECT config_value FROM search_config WHERE config_key = 'last_full_sync') as ultima_sincronizacion
         FROM convocatorias
       )

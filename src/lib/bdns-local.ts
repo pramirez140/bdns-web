@@ -36,12 +36,12 @@ export class BDNSLocalClient {
       const soloAbiertas = filtros.estadoConvocatoria === 'abierta';
 
       // Build sort clause - default to newest grants first by publication date
-      let sortClause = 'ORDER BY fecha_registro DESC';
+      let sortClause = 'ORDER BY c.registration_date DESC';
       if (params.sortBy && params.sortOrder) {
         const sortFieldMap: { [key: string]: string } = {
-          'fechaPublicacion': 'fecha_registro',
-          'importeTotal': 'importe_total', 
-          'titulo': 'titulo'
+          'fechaPublicacion': 'c.registration_date',
+          'importeTotal': 'c.total_amount', 
+          'titulo': 'c.title'
         };
         
         const dbField = sortFieldMap[params.sortBy];
@@ -103,10 +103,33 @@ export class BDNSLocalClient {
       // Search by codigo_bdns
       const results = await this.db.searchConvocatorias(undefined, undefined, undefined, undefined, undefined, undefined, false, 1, 0);
       
-      // For now, let's implement a direct query to get by codigo_bdns
+      // For now, let's implement a direct query to get by bdns_code
       const query = `
-        SELECT * FROM convocatorias 
-        WHERE codigo_bdns = $1 
+        SELECT 
+          c.bdns_code as codigo_bdns, 
+          c.title as titulo, 
+          c.title_co_official as titulo_cooficial, 
+          o.name as desc_organo,
+          c.registration_date as fecha_registro, 
+          c.modification_date as fecha_mod, 
+          c.application_start_date as inicio_solicitud, 
+          c.application_end_date as fin_solicitud,
+          c.is_open as abierto, 
+          c.total_amount as importe_total,
+          c.max_beneficiary_amount as importe_maximo_beneficiario,
+          c.description_br, 
+          c.url_esp_br, 
+          c.eu_fund as fondo_ue,
+          c.permalink_grant as permalink_convocatoria, 
+          c.permalink_awards as permalink_concesiones,
+          c.legacy_financiacion as financiacion,
+          c.legacy_finalidad as finalidad,
+          c.legacy_instrumento as instrumento,
+          c.legacy_sector as sector,
+          c.legacy_tipo_beneficiario as tipo_beneficiario
+        FROM convocatorias c
+        JOIN organizations o ON c.organization_id = o.id
+        WHERE c.bdns_code = $1 
         LIMIT 1
       `;
       
@@ -179,14 +202,14 @@ export class BDNSLocalClient {
     const sector = parseJSON(row.sector, []);
 
     return {
-      identificador: row.codigo_bdns,
-      titulo: row.titulo || '',
-      organoConvocante: row.desc_organo || '',
-      fechaPublicacion: row.fecha_registro || new Date(),
-      fechaApertura: row.inicio_solicitud || row.fecha_registro || new Date(),
-      fechaCierre: row.fin_solicitud || null,
-      importeTotal: parseFloat(row.importe_total || '0'),
-      importeMaximoBeneficiario: 0, // Not stored in our schema yet
+      identificador: row.codigo_bdns, // This is aliased in the query
+      titulo: row.titulo || '', // This is aliased in the query
+      organoConvocante: row.desc_organo || '', // This is aliased in the query  
+      fechaPublicacion: row.fecha_registro || new Date(), // This is aliased in the query
+      fechaApertura: row.inicio_solicitud || row.fecha_registro || new Date(), // This is aliased in the query
+      fechaCierre: row.fin_solicitud || null, // This is aliased in the query
+      importeTotal: parseFloat(row.importe_total || '0'), // This is aliased in the query
+      importeMaximoBeneficiario: parseFloat(row.importe_maximo_beneficiario || '0'),
       objetivos: finalidad.descripcion || row.titulo || 'Consultar convocatoria para objetivos específicos',
       beneficiarios: this.extractBeneficiariosDescription(tipoBeneficiario),
       requisitos: row.descripcion_br ? [row.descripcion_br] : ['Consultar bases oficiales de la convocatoria'],

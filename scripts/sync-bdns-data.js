@@ -307,11 +307,11 @@ class BDNSDataSynchronizer {
     const codigoBdns = convocatoria['codigo-BDNS'];
     const newFechaMod = this.parseDate(convocatoria['fecha-mod']);
     
-    // First, check if record exists and get current fecha_mod
+    // First, check if record exists and get current modification_date
     const existingQuery = `
-      SELECT fecha_mod, last_synced_at
+      SELECT modification_date, last_synced_at
       FROM convocatorias 
-      WHERE codigo_bdns = $1
+      WHERE bdns_code = $1
     `;
     
     try {
@@ -325,7 +325,7 @@ class BDNSDataSynchronizer {
         
       } else {
         const existing = existingResult.rows[0];
-        const existingFechaMod = existing.fecha_mod;
+        const existingFechaMod = existing.modification_date;
         
         // Compare modification dates
         if (!newFechaMod || !existingFechaMod) {
@@ -355,109 +355,172 @@ class BDNSDataSynchronizer {
   }
 
   async insertNewRecord(convocatoria) {
-    const query = `
-      INSERT INTO convocatorias (
-        codigo_bdns, titulo, titulo_cooficial, desc_organo, dir3_organo,
-        fecha_registro, fecha_mod, inicio_solicitud, fin_solicitud,
-        abierto, region, financiacion, importe_total,
-        finalidad, instrumento, sector, tipo_beneficiario,
-        descripcion_br, url_esp_br, fondo_ue,
-        permalink_convocatoria, permalink_concesiones,
-        created_at, updated_at, last_synced_at
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-        NOW(), NOW(), NOW()
-      )
-    `;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const values = [
-      convocatoria['codigo-BDNS'],
-      convocatoria.titulo || '',
-      convocatoria['titulo-cooficial'] || null,
-      convocatoria['desc-organo'] || '',
-      convocatoria['dir3-organo'] || null,
-      this.parseDate(convocatoria['fecha-registro']),
-      this.parseDate(convocatoria['fecha-mod']),
-      this.parseDate(convocatoria['inicio-solicitud']),
-      this.parseDate(convocatoria['fin-solicitud']),
-      convocatoria.abierto || false,
-      this.arrayToPostgresArray(convocatoria.region),
-      JSON.stringify(convocatoria.financiacion || []),
-      this.extractImporteTotal(convocatoria.financiacion),
-      JSON.stringify(convocatoria.finalidad || {}),
-      JSON.stringify(convocatoria.instrumento || []),
-      JSON.stringify(convocatoria.sector || []),
-      JSON.stringify(convocatoria['tipo-beneficiario'] || []),
-      convocatoria.descripcionBR || null,
-      convocatoria.URLespBR || null,
-      convocatoria.fondoUE || null,
-      convocatoria['permalink-convocatoria'] || null,
-      convocatoria['permalink-concesiones'] || null
-    ];
+      // 1. Get or create organization
+      const organizationId = await this.getOrCreateOrganization(
+        convocatoria['desc-organo'] || '',
+        convocatoria['dir3-organo'] || null,
+        client
+      );
 
-    await pool.query(query, values);
+      // 2. Insert main grant record
+      const grantQuery = `
+        INSERT INTO convocatorias (
+          bdns_code, title, title_co_official, organization_id,
+          registration_date, modification_date, application_start_date, application_end_date,
+          is_open, total_amount, max_beneficiary_amount,
+          description_br, url_esp_br, eu_fund,
+          permalink_grant, permalink_awards, search_vector,
+          legacy_financiacion, legacy_finalidad, legacy_instrumento, 
+          legacy_sector, legacy_tipo_beneficiario, legacy_region,
+          created_at, updated_at, last_synced_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+          NOW(), NOW(), NOW()
+        ) RETURNING id
+      `;
+
+      const grantValues = [
+        convocatoria['codigo-BDNS'],
+        convocatoria.titulo || '',
+        convocatoria['titulo-cooficial'] || null,
+        organizationId,
+        this.parseDate(convocatoria['fecha-registro']),
+        this.parseDate(convocatoria['fecha-mod']),
+        this.parseDate(convocatoria['inicio-solicitud']),
+        this.parseDate(convocatoria['fin-solicitud']),
+        convocatoria.abierto || false,
+        this.extractImporteTotal(convocatoria.financiacion),
+        null, // max_beneficiary_amount - not provided by API
+        convocatoria.descripcionBR || null,
+        convocatoria.URLespBR || null,
+        convocatoria.fondoUE || null,
+        convocatoria['permalink-convocatoria'] || null,
+        convocatoria['permalink-concesiones'] || null,
+        null, // search_vector - will be updated later
+        JSON.stringify(convocatoria.financiacion || []),
+        JSON.stringify(convocatoria.finalidad || {}),
+        JSON.stringify(convocatoria.instrumento || []),
+        JSON.stringify(convocatoria.sector || []),
+        JSON.stringify(convocatoria['tipo-beneficiario'] || []),
+        this.arrayToPostgresArray(convocatoria.region)
+      ];
+
+      const grantResult = await client.query(grantQuery, grantValues);
+      const grantId = grantResult.rows[0].id;
+
+      // 3. Update search vector
+      await client.query(`
+        UPDATE convocatorias 
+        SET search_vector = to_tsvector('spanish', 
+          COALESCE(title, '') || ' ' || 
+          COALESCE(description_br, '')
+        )
+        WHERE id = $1
+      `, [grantId]);
+
+      // 4. Handle classification data in junction tables
+      await this.insertClassificationData(grantId, convocatoria, client);
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async updateExistingRecord(convocatoria) {
-    const query = `
-      UPDATE convocatorias SET
-        titulo = $2,
-        titulo_cooficial = $3,
-        desc_organo = $4,
-        dir3_organo = $5,
-        fecha_mod = $6,
-        inicio_solicitud = $7,
-        fin_solicitud = $8,
-        abierto = $9,
-        region = $10,
-        financiacion = $11,
-        importe_total = $12,
-        finalidad = $13,
-        instrumento = $14,
-        sector = $15,
-        tipo_beneficiario = $16,
-        descripcion_br = $17,
-        url_esp_br = $18,
-        fondo_ue = $19,
-        permalink_convocatoria = $20,
-        permalink_concesiones = $21,
-        updated_at = NOW(),
-        last_synced_at = NOW()
-      WHERE codigo_bdns = $1
-    `;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const values = [
-      convocatoria['codigo-BDNS'],
-      convocatoria.titulo || '',
-      convocatoria['titulo-cooficial'] || null,
-      convocatoria['desc-organo'] || '',
-      convocatoria['dir3-organo'] || null,
-      this.parseDate(convocatoria['fecha-mod']),
-      this.parseDate(convocatoria['inicio-solicitud']),
-      this.parseDate(convocatoria['fin-solicitud']),
-      convocatoria.abierto || false,
-      this.arrayToPostgresArray(convocatoria.region),
-      JSON.stringify(convocatoria.financiacion || []),
-      this.extractImporteTotal(convocatoria.financiacion),
-      JSON.stringify(convocatoria.finalidad || {}),
-      JSON.stringify(convocatoria.instrumento || []),
-      JSON.stringify(convocatoria.sector || []),
-      JSON.stringify(convocatoria['tipo-beneficiario'] || []),
-      convocatoria.descripcionBR || null,
-      convocatoria.URLespBR || null,
-      convocatoria.fondoUE || null,
-      convocatoria['permalink-convocatoria'] || null,
-      convocatoria['permalink-concesiones'] || null
-    ];
+      // 1. Get or create organization (in case organization info changed)
+      const organizationId = await this.getOrCreateOrganization(
+        convocatoria['desc-organo'] || '',
+        convocatoria['dir3-organo'] || null,
+        client
+      );
 
-    await pool.query(query, values);
+      // 2. Update main grant record
+      const updateQuery = `
+        UPDATE convocatorias SET
+          title = $2,
+          title_co_official = $3,
+          organization_id = $4,
+          modification_date = $5,
+          application_start_date = $6,
+          application_end_date = $7,
+          is_open = $8,
+          total_amount = $9,
+          description_br = $10,
+          url_esp_br = $11,
+          eu_fund = $12,
+          permalink_grant = $13,
+          permalink_awards = $14,
+          legacy_financiacion = $15,
+          legacy_finalidad = $16,
+          legacy_instrumento = $17,
+          legacy_sector = $18,
+          legacy_tipo_beneficiario = $19,
+          legacy_region = $20,
+          search_vector = to_tsvector('spanish', 
+            COALESCE($2, '') || ' ' || 
+            COALESCE($10, '')
+          ),
+          updated_at = NOW(),
+          last_synced_at = NOW()
+        WHERE bdns_code = $1
+        RETURNING id
+      `;
+
+      const values = [
+        convocatoria['codigo-BDNS'],
+        convocatoria.titulo || '',
+        convocatoria['titulo-cooficial'] || null,
+        organizationId,
+        this.parseDate(convocatoria['fecha-mod']),
+        this.parseDate(convocatoria['inicio-solicitud']),
+        this.parseDate(convocatoria['fin-solicitud']),
+        convocatoria.abierto || false,
+        this.extractImporteTotal(convocatoria.financiacion),
+        convocatoria.descripcionBR || null,
+        convocatoria.URLespBR || null,
+        convocatoria.fondoUE || null,
+        convocatoria['permalink-convocatoria'] || null,
+        convocatoria['permalink-concesiones'] || null,
+        JSON.stringify(convocatoria.financiacion || []),
+        JSON.stringify(convocatoria.finalidad || {}),
+        JSON.stringify(convocatoria.instrumento || []),
+        JSON.stringify(convocatoria.sector || []),
+        JSON.stringify(convocatoria['tipo-beneficiario'] || []),
+        this.arrayToPostgresArray(convocatoria.region)
+      ];
+
+      const result = await client.query(updateQuery, values);
+      const grantId = result.rows[0].id;
+
+      // 3. Update classification data in junction tables
+      await this.updateClassificationData(grantId, convocatoria, client);
+
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async touchRecord(codigoBdns) {
     const query = `
       UPDATE convocatorias 
       SET last_synced_at = NOW()
-      WHERE codigo_bdns = $1
+      WHERE bdns_code = $1
     `;
     await pool.query(query, [codigoBdns]);
   }
@@ -542,6 +605,238 @@ class BDNSDataSynchronizer {
         console.log(`  ... and ${this.errors.length - 5} more errors`);
       }
     }
+  }
+
+  // Organization management methods
+  async getOrCreateOrganization(orgName, dir3Code, client) {
+    if (!orgName || orgName.trim() === '') {
+      throw new Error('Organization name is required');
+    }
+
+    const normalizedName = orgName.trim();
+    
+    // First, try to find existing organization by name or normalized name
+    const existingQuery = `
+      SELECT id FROM organizations 
+      WHERE name = $1 OR normalized_name = $1
+      LIMIT 1
+    `;
+    
+    const existingResult = await client.query(existingQuery, [normalizedName]);
+    
+    if (existingResult.rows.length > 0) {
+      return existingResult.rows[0].id;
+    }
+
+    // Create new organization with hierarchy detection
+    const hierarchy = this.parseOrganizationHierarchy(normalizedName);
+    
+    let parentId = null;
+    let levelId = 1; // Default to top level
+
+    // If this is a hierarchical organization, try to find/create parent
+    if (hierarchy.length > 1) {
+      const parentName = hierarchy.slice(0, -1).join(' - ');
+      levelId = hierarchy.length;
+      
+      // Try to find parent organization
+      const parentQuery = `
+        SELECT id FROM organizations 
+        WHERE name = $1 OR normalized_name = $1
+        LIMIT 1
+      `;
+      const parentResult = await client.query(parentQuery, [parentName]);
+      
+      if (parentResult.rows.length > 0) {
+        parentId = parentResult.rows[0].id;
+      } else {
+        // Create parent organization recursively (only one level up)
+        parentId = await this.createSimpleOrganization(parentName, null, hierarchy.length - 1, client);
+      }
+    }
+
+    // Create the organization
+    return await this.createSimpleOrganization(normalizedName, parentId, levelId, client, dir3Code);
+  }
+
+  async createSimpleOrganization(name, parentId, level, client, dir3Code = null) {
+    const insertQuery = `
+      INSERT INTO organizations (
+        name, full_name, level_id, parent_id, dir3_code, 
+        normalized_name, is_active, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, true, NOW(), NOW())
+      RETURNING id
+    `;
+    
+    const values = [
+      name,
+      name, // full_name same as name for now
+      level,
+      parentId,
+      dir3Code,
+      name // normalized_name same as name for now
+    ];
+    
+    const result = await client.query(insertQuery, values);
+    return result.rows[0].id;
+  }
+
+  parseOrganizationHierarchy(orgName) {
+    // Split by " - " to detect hierarchy
+    return orgName.split(' - ').map(part => part.trim()).filter(part => part.length > 0);
+  }
+
+  // Classification data management
+  async insertClassificationData(grantId, convocatoria, client) {
+    // Insert sectors
+    if (convocatoria.sector && Array.isArray(convocatoria.sector)) {
+      for (const sectorData of convocatoria.sector) {
+        if (sectorData && sectorData.descripcion) {
+          const sectorId = await this.getOrCreateSector(sectorData, client);
+          await this.linkGrantToSector(grantId, sectorId, client);
+        }
+      }
+    }
+
+    // Insert instruments
+    if (convocatoria.instrumento && Array.isArray(convocatoria.instrumento)) {
+      for (const instrumentData of convocatoria.instrumento) {
+        if (instrumentData && instrumentData.descripcion) {
+          const instrumentId = await this.getOrCreateInstrument(instrumentData, client);
+          await this.linkGrantToInstrument(grantId, instrumentId, client);
+        }
+      }
+    }
+
+    // Insert regions
+    if (convocatoria.region && Array.isArray(convocatoria.region)) {
+      for (const regionName of convocatoria.region) {
+        if (regionName && regionName.trim()) {
+          const regionId = await this.getOrCreateRegion(regionName.trim(), client);
+          await this.linkGrantToRegion(grantId, regionId, client);
+        }
+      }
+    }
+  }
+
+  async updateClassificationData(grantId, convocatoria, client) {
+    // For updates, we'll delete existing links and recreate them
+    // This ensures data consistency
+    
+    await client.query('DELETE FROM grant_sectors WHERE grant_id = $1', [grantId]);
+    await client.query('DELETE FROM grant_instruments WHERE grant_id = $1', [grantId]);
+    await client.query('DELETE FROM grant_regions WHERE grant_id = $1', [grantId]);
+    
+    // Now insert the new data
+    await this.insertClassificationData(grantId, convocatoria, client);
+  }
+
+  async getOrCreateSector(sectorData, client) {
+    const description = sectorData.descripcion || '';
+    const code = sectorData.codigo || '';
+    
+    // Try to find existing sector
+    const existingQuery = `
+      SELECT id FROM sectors 
+      WHERE (code = $1 AND code != '') OR name = $2
+      LIMIT 1
+    `;
+    
+    const existingResult = await client.query(existingQuery, [code, description]);
+    
+    if (existingResult.rows.length > 0) {
+      return existingResult.rows[0].id;
+    }
+
+    // Create new sector
+    const insertQuery = `
+      INSERT INTO sectors (code, name, description, is_active, created_at)
+      VALUES ($1, $2, $3, true, NOW())
+      RETURNING id
+    `;
+    
+    const result = await client.query(insertQuery, [code || '', description, description]);
+    return result.rows[0].id;
+  }
+
+  async getOrCreateInstrument(instrumentData, client) {
+    const description = instrumentData.descripcion || '';
+    const code = instrumentData.codigo || '';
+    
+    // Try to find existing instrument
+    const existingQuery = `
+      SELECT id FROM instruments 
+      WHERE (code = $1 AND code != '') OR name = $2
+      LIMIT 1
+    `;
+    
+    const existingResult = await client.query(existingQuery, [code, description]);
+    
+    if (existingResult.rows.length > 0) {
+      return existingResult.rows[0].id;
+    }
+
+    // Create new instrument
+    const insertQuery = `
+      INSERT INTO instruments (code, name, description, is_active, created_at)
+      VALUES ($1, $2, $3, true, NOW())
+      RETURNING id
+    `;
+    
+    const result = await client.query(insertQuery, [code || '', description, description]);
+    return result.rows[0].id;
+  }
+
+  async getOrCreateRegion(regionName, client) {
+    // Try to find existing region
+    const existingQuery = `
+      SELECT id FROM regions 
+      WHERE name = $1
+      LIMIT 1
+    `;
+    
+    const existingResult = await client.query(existingQuery, [regionName]);
+    
+    if (existingResult.rows.length > 0) {
+      return existingResult.rows[0].id;
+    }
+
+    // Create new region
+    const insertQuery = `
+      INSERT INTO regions (code, name, is_active, created_at)
+      VALUES ($1, $2, true, NOW())
+      RETURNING id
+    `;
+    
+    const result = await client.query(insertQuery, [regionName.toLowerCase().replace(/\s+/g, '_'), regionName]);
+    return result.rows[0].id;
+  }
+
+  async linkGrantToSector(grantId, sectorId, client) {
+    const query = `
+      INSERT INTO grant_sectors (grant_id, sector_id)
+      VALUES ($1, $2)
+      ON CONFLICT (grant_id, sector_id) DO NOTHING
+    `;
+    await client.query(query, [grantId, sectorId]);
+  }
+
+  async linkGrantToInstrument(grantId, instrumentId, client) {
+    const query = `
+      INSERT INTO grant_instruments (grant_id, instrument_id)
+      VALUES ($1, $2)
+      ON CONFLICT (grant_id, instrument_id) DO NOTHING
+    `;
+    await client.query(query, [grantId, instrumentId]);
+  }
+
+  async linkGrantToRegion(grantId, regionId, client) {
+    const query = `
+      INSERT INTO grant_regions (grant_id, region_id)
+      VALUES ($1, $2)
+      ON CONFLICT (grant_id, region_id) DO NOTHING
+    `;
+    await client.query(query, [grantId, regionId]);
   }
 
   // Helper methods
