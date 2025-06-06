@@ -9,11 +9,14 @@ import {
   DocumentTextIcon,
   CalendarIcon,
   CurrencyEuroIcon,
-  BuildingOfficeIcon
+  BuildingOfficeIcon,
+  ArrowDownTrayIcon
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import { useSearchPersistence } from '@/hooks/useSearchPersistence';
 import { FavoriteButton } from '@/components/ui/favorite-button';
+import { useExport } from '@/hooks/useExport';
+import { useState } from 'react';
 
 interface SearchResultsProps {
   results: SearchResult<ConvocatoriaData>;
@@ -23,16 +26,25 @@ interface SearchResultsProps {
     sortBy: string;
     sortOrder: 'asc' | 'desc';
   };
+  searchParams?: {
+    query?: string;
+    organismos?: string[];
+    region?: string[];
+  };
 }
 
 export default function SearchResults({ 
   results, 
   onPageChange, 
   onSortChange,
-  currentSort 
+  currentSort,
+  searchParams
 }: SearchResultsProps) {
   const { data, total, page, pageSize, totalPages } = results;
   const { saveScrollPosition, saveResultItemPosition } = useSearchPersistence();
+  const { exportData, isExporting, error, clearError } = useExport();
+  const [showExportOptions, setShowExportOptions] = useState(false);
+  const [exportLimit, setExportLimit] = useState(100);
 
   // Save scroll position when clicking on a grant
   const handleGrantClick = (grantId: string) => {
@@ -81,6 +93,29 @@ export default function SearchResults({
       ? 'desc' 
       : 'asc';
     onSortChange(field, newOrder);
+  };
+
+  const handleExport = async (format: 'xlsx' | 'csv') => {
+    try {
+      clearError();
+      await exportData({
+        query: searchParams?.query,
+        organismos: searchParams?.organismos,
+        region: searchParams?.region,
+        limit: exportLimit,
+        format
+      });
+      setShowExportOptions(false);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
+
+  // Close export options when clicking outside
+  const handleClickOutside = () => {
+    if (showExportOptions) {
+      setShowExportOptions(false);
+    }
   };
 
   const renderPagination = () => {
@@ -189,13 +224,64 @@ export default function SearchResults({
       {/* Results Header */}
       <div className="card p-4">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex-1">
             <h2 className="text-lg font-medium text-gray-900">
               {total.toLocaleString('es-ES')} convocatorias encontradas
             </h2>
             <p className="text-xs text-gray-500 mt-1">
               * La fecha mostrada es el registro en BDNS. Para fechas de cierre, consulta el portal oficial de cada convocatoria.
             </p>
+          </div>
+          
+          {/* Export Options */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportOptions(!showExportOptions)}
+              disabled={isExporting}
+              className="btn-outline flex items-center gap-2 text-sm"
+            >
+              <ArrowDownTrayIcon className={`h-4 w-4 ${isExporting ? 'animate-pulse' : ''}`} />
+              {isExporting ? 'Exportando...' : 'Exportar'}
+            </button>
+            
+            {showExportOptions && (
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                <div className="p-4 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Número de resultados
+                    </label>
+                    <select
+                      value={exportLimit}
+                      onChange={(e) => setExportLimit(parseInt(e.target.value))}
+                      className="w-full text-sm border border-gray-300 rounded-md px-2 py-1"
+                    >
+                      <option value={50}>50 resultados</option>
+                      <option value={100}>100 resultados</option>
+                      <option value={250}>250 resultados</option>
+                      <option value={500}>500 resultados</option>
+                      <option value={1000}>1000 resultados</option>
+                    </select>
+                  </div>
+                  
+                  <div className="w-full">
+                    <button
+                      onClick={() => handleExport('csv')}
+                      disabled={isExporting}
+                      className="w-full bg-blue-600 text-white text-sm px-3 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Exportar a CSV
+                    </button>
+                  </div>
+                  
+                  {error && (
+                    <div className="text-red-600 text-xs">
+                      Error: {error}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -243,6 +329,8 @@ export default function SearchResults({
                 <div className="flex items-start justify-between mb-2">
                   <Link 
                     href={`/convocatorias/${convocatoria.identificador}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="block hover:text-bdns-blue flex-1"
                     onClick={() => handleGrantClick(convocatoria.identificador)}
                   >

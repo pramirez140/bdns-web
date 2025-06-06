@@ -55,6 +55,8 @@ services:
       - NODE_ENV=development
       - BDNS_API_BASE_URL=https://www.infosubvenciones.es/bdnstrans
       - DATABASE_URL=postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
+      - NEXTAUTH_URL=http://localhost:3001
+      - NEXTAUTH_SECRET=your-secret-key-here
     volumes:
       - .:/app
       - /app/node_modules

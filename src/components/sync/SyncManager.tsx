@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { RefreshCw, Database, Clock, AlertCircle, CheckCircle } from 'lucide-react';
+import { RefreshCw, Database, Clock, AlertCircle, CheckCircle, Download, HardDrive } from 'lucide-react';
 
 interface SyncStats {
   total_convocatorias: number;
@@ -368,33 +368,30 @@ export function SyncManager() {
               onClick={() => startSync('incremental')}
               disabled={isLoading || isSyncing || isCompleteMigrating}
               variant="outline"
-              className="h-16 flex flex-col gap-1"
+              className="h-12 flex items-center justify-center gap-2 min-w-0"
             >
-              <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>Sincronización Incremental</span>
-              <span className="text-xs text-muted-foreground">Actualizar cambios recientes</span>
+              <RefreshCw className={`h-4 w-4 flex-shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="truncate">Incremental</span>
             </Button>
 
             <Button
               onClick={() => startSync('full')}
               disabled={isLoading || isSyncing || isCompleteMigrating}
               variant="default"
-              className="h-16 flex flex-col gap-1"
+              className="h-12 flex items-center justify-center gap-2 min-w-0"
             >
-              <Database className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>Sincronización Completa</span>
-              <span className="text-xs text-muted-foreground">Datos de 2025 (optimizado)</span>
+              <Download className={`h-4 w-4 flex-shrink-0 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="truncate">Completa</span>
             </Button>
 
             <Button
               onClick={() => startSync('complete')}
               disabled={isLoading || isSyncing || isCompleteMigrating}
               variant="destructive"
-              className="h-16 flex flex-col gap-1"
+              className="h-12 flex items-center justify-center gap-2 min-w-0"
             >
-              <Database className={`h-4 w-4 ${isCompleteMigrating ? 'animate-spin' : ''}`} />
-              <span>Migración Completa</span>
-              <span className="text-xs text-muted-foreground">Histórico completo (solo si es necesario)</span>
+              <HardDrive className={`h-4 w-4 flex-shrink-0 ${isCompleteMigrating ? 'animate-spin' : ''}`} />
+              <span className="truncate">Migración</span>
             </Button>
           </div>
 

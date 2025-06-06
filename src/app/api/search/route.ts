@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bdnsLocalClient } from '@/lib/bdns-local';
 import { SearchFilters, SearchParams } from '@/types/bdns';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
 export async function GET(request: NextRequest) {
   try {
+    // Get user session
+    const session = await getServerSession(authOptions);
     const searchParams = request.nextUrl.searchParams;
     
     // Extract search parameters
@@ -44,9 +53,33 @@ export async function GET(request: NextRequest) {
     };
 
     console.log('🔍 API Search request (local database):', { filtros, searchConfig });
+    console.log('📝 Session user:', session?.user?.id ? `User ${session.user.id}` : 'No session');
 
     // Perform search using local database
     const results = await bdnsLocalClient.buscarConvocatorias(filtros, searchConfig);
+
+    // Save search history for logged-in users
+    if (session?.user?.id && query) {
+      try {
+        await pool.query(`
+          INSERT INTO search_history (user_id, query, filters, result_count)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (user_id, LOWER(query)) WHERE user_id IS NOT NULL
+          DO UPDATE SET 
+            result_count = EXCLUDED.result_count,
+            filters = EXCLUDED.filters,
+            updated_at = CURRENT_TIMESTAMP
+        `, [
+          session.user.id,
+          query.trim(),
+          JSON.stringify(filtros),
+          results.total
+        ]);
+      } catch (error) {
+        console.error('Failed to save search history:', error);
+        // Don't fail the search if history save fails
+      }
+    }
 
     console.log('✅ Local database search successful:', {
       total: results.total,

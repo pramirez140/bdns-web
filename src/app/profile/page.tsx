@@ -18,7 +18,11 @@ import {
   Calendar,
   AlertCircle,
   CheckCircle,
-  Loader2
+  Loader2,
+  Search,
+  Clock,
+  Trash2,
+  RefreshCw
 } from 'lucide-react'
 
 export default function ProfilePage() {
@@ -56,6 +60,10 @@ export default function ProfilePage() {
   
   // Email verification resend state
   const [resendingVerification, setResendingVerification] = useState(false)
+  
+  // Search history state
+  const [searchHistory, setSearchHistory] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Load user data
   useEffect(() => {
@@ -319,6 +327,59 @@ export default function ProfilePage() {
     }
   }
 
+  const fetchSearchHistory = async () => {
+    setLoadingHistory(true)
+    try {
+      const response = await fetch('/api/search/history')
+      if (response.ok) {
+        const data = await response.json()
+        setSearchHistory(data.data || [])
+      }
+    } catch (error) {
+      console.error('Failed to fetch search history:', error)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
+  const deleteSearchItem = async (query: string) => {
+    try {
+      const response = await fetch(`/api/search/history?query=${encodeURIComponent(query)}`, {
+        method: 'DELETE',
+      })
+      if (response.ok) {
+        setSearchHistory(prev => prev.filter(item => item.query !== query))
+        setMessage({ type: 'success', text: 'Búsqueda eliminada del historial' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Error al eliminar búsqueda' })
+    }
+  }
+
+  const clearAllHistory = async () => {
+    if (!confirm('¿Estás seguro de que quieres borrar todo tu historial de búsquedas?')) return
+    
+    try {
+      const response = await fetch('/api/search/history', {
+        method: 'DELETE',
+      })
+      if (response.ok) {
+        setSearchHistory([])
+        setMessage({ type: 'success', text: 'Historial de búsquedas borrado' })
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Error al borrar historial' })
+    }
+  }
+
+  // Auto-fetch search history when tab is selected
+  useEffect(() => {
+    const tabValue = new URLSearchParams(window.location.search).get('tab')
+    if (tabValue === 'search-history' && searchHistory.length === 0) {
+      fetchSearchHistory()
+    }
+  }, [])
+
   if (!session) {
     return null
   }
@@ -343,15 +404,29 @@ export default function ProfilePage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+      <Tabs 
+        defaultValue="profile" 
+        className="space-y-6"
+        onValueChange={(value) => {
+          if (value === 'search-history' && searchHistory.length === 0 && !loadingHistory) {
+            fetchSearchHistory()
+          }
+        }}
+      >
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
-            <span>Información Personal</span>
+            <span className="hidden sm:inline">Información Personal</span>
+            <span className="sm:hidden">Perfil</span>
           </TabsTrigger>
           <TabsTrigger value="security" className="flex items-center gap-2">
             <Shield className="h-4 w-4" />
             <span>Seguridad</span>
+          </TabsTrigger>
+          <TabsTrigger value="search-history" className="flex items-center gap-2">
+            <Search className="h-4 w-4" />
+            <span className="hidden sm:inline">Historial</span>
+            <span className="sm:hidden">Búsquedas</span>
           </TabsTrigger>
           <TabsTrigger value="activity" className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
@@ -729,6 +804,94 @@ export default function ProfilePage() {
                 </p>
               </div>
             </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="search-history" className="space-y-0">
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold">Historial de Búsquedas</h2>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchSearchHistory}
+                  disabled={loadingHistory}
+                >
+                  {loadingHistory ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                </Button>
+                {searchHistory.length > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={clearAllHistory}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Borrar todo
+                  </Button>
+                )}
+              </div>
+            </div>
+            
+            {loadingHistory && searchHistory.length === 0 ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              </div>
+            ) : searchHistory.length === 0 ? (
+              <div className="text-center py-8">
+                <Search className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500">No hay búsquedas recientes</p>
+                <p className="text-sm text-gray-400 mt-1">Tus búsquedas aparecerán aquí</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {searchHistory.map((item) => (
+                  <div
+                    key={item.query + item.last_searched}
+                    className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg border border-gray-100"
+                  >
+                    <div className="flex items-center gap-3 flex-1">
+                      <Clock className="h-4 w-4 text-gray-400" />
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{item.query}</p>
+                        <p className="text-xs text-gray-500">
+                          {item.result_count} resultados • {new Date(item.last_searched).toLocaleDateString('es-ES', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteSearchItem(item.query)}
+                      className="text-gray-400 hover:text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {!loadingHistory && searchHistory.length === 0 && (
+              <Button
+                variant="outline"
+                onClick={fetchSearchHistory}
+                className="w-full mt-4"
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Cargar historial
+              </Button>
+            )}
           </Card>
         </TabsContent>
       </Tabs>

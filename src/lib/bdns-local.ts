@@ -35,8 +35,8 @@ export class BDNSLocalClient {
       const importeMax = filtros.importeMaximo;
       const soloAbiertas = filtros.estadoConvocatoria === 'abierta';
 
-      // Build sort clause
-      let sortClause = 'ORDER BY fecha_registro DESC'; // default sort
+      // Build sort clause - default to newest grants first by publication date
+      let sortClause = 'ORDER BY fecha_registro DESC';
       if (params.sortBy && params.sortOrder) {
         const sortFieldMap: { [key: string]: string } = {
           'fechaPublicacion': 'fecha_registro',

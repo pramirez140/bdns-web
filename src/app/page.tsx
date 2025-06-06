@@ -403,6 +403,13 @@ function HomePage() {
                   sortBy: currentParams.sortBy || 'fechaPublicacion',
                   sortOrder: currentParams.sortOrder || 'desc'
                 }}
+                searchParams={{
+                  query: currentFilters.query,
+                  organismos: Array.isArray(currentFilters.organoConvocante) 
+                    ? currentFilters.organoConvocante 
+                    : currentFilters.organoConvocante ? [currentFilters.organoConvocante] : undefined,
+                  region: [] // Add region support later if needed
+                }}
               />
             )}
           </div>
