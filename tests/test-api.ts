@@ -1,4 +1,4 @@
-import { BDNSRealApiClient } from './src/lib/bdns-api-real.js';
+import { BDNSRealApiClient } from '../src/lib/bdns-api-real';
 
 async function testBDNSAPI() {
   try {

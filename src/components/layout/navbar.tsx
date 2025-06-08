@@ -41,6 +41,13 @@ export function Navbar() {
               Búsqueda
             </Link>
             
+            <Link
+              href="/wiki"
+              className="text-gray-700 hover:text-bdns-blue px-3 py-2 rounded-md text-sm font-medium"
+            >
+              Wiki
+            </Link>
+            
             {session && (
               <>
                 <Link
