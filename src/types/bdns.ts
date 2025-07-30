@@ -43,9 +43,12 @@ export interface SubvencionBDNS {
 
 export interface ConvocatoriaData {
   // Campos básicos según BDNS
+  id?: number; // Internal database ID for favorites
   identificador: string;
   titulo: string;
   organoConvocante: string;
+  organoConvocanteCorto?: string; // Short organization name
+  organizationId?: number; // Organization ID for linking
   fechaPublicacion: Date;
   fechaApertura: Date;
   fechaCierre: Date | null;
@@ -101,6 +104,8 @@ export interface SearchResult<T> {
   page: number;
   pageSize: number;
   totalPages: number;
+  hasMore?: boolean; // Indicates if there are more results available
+  hasPrevious?: boolean; // Indicates if there's a previous page
 }
 
 export interface BasicFilterSystem {

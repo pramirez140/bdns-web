@@ -50,44 +50,74 @@ export class BDNSLocalClient {
         }
       }
 
-      // Perform search with sorting
-      const results = await this.db.searchConvocatoriasWithSort(
-        searchTerm,
-        organoFilter,
-        fechaDesde,
-        fechaHasta,
-        importeMin,
-        importeMax,
-        soloAbiertas,
-        pageSize,
-        offset,
-        sortClause
-      );
+      // Check if we have organization IDs (for hierarchical filtering)
+      const hasOrgIds = organoFilter && Array.isArray(organoFilter) && 
+                        organoFilter.some(org => !isNaN(parseInt(org)));
 
-      // Get total count for pagination
-      const totalCount = await this.db.getSearchCount(
-        searchTerm,
-        organoFilter,
-        fechaDesde,
-        fechaHasta,
-        importeMin,
-        importeMax,
-        soloAbiertas
-      );
+      let results;
+      // PERFORMANCE FIX: Remove totalCount query - use hasMore approach instead
+      const hasMore = true; // We'll check if there are more results than requested
+
+      if (hasOrgIds) {
+        // Use hierarchical search when we have organization IDs
+        const organizationIds = organoFilter
+          .map(org => parseInt(org))
+          .filter(id => !isNaN(id));
+
+        // Fetch one extra result to check if there are more pages
+        results = await this.db.searchConvocatoriasHierarchical(
+          searchTerm,
+          organizationIds,
+          fechaDesde,
+          fechaHasta,
+          importeMin,
+          importeMax,
+          soloAbiertas,
+          pageSize + 1, // Fetch one extra to check for more results
+          offset,
+          sortClause
+        );
+      } else {
+        // Use regular search for backward compatibility
+        // Fetch one extra result to check if there are more pages
+        results = await this.db.searchConvocatoriasWithSort(
+          searchTerm,
+          organoFilter,
+          fechaDesde,
+          fechaHasta,
+          importeMin,
+          importeMax,
+          soloAbiertas,
+          pageSize + 1, // Fetch one extra to check for more results
+          offset,
+          sortClause
+        );
+      }
+
+      // Check if we have more results than requested
+      const hasMoreResults = results.length > pageSize;
+      if (hasMoreResults) {
+        // Remove the extra result
+        results = results.slice(0, pageSize);
+      }
 
       // Convert database results to our ConvocatoriaData format
       const convocatorias = results.map(row => this.mapDatabaseToConvocatoria(row));
 
       const searchTime = Date.now() - startTime;
       console.log(`✅ Local search completed in ${searchTime}ms`);
-      console.log(`📊 Found ${totalCount} total results, returning ${convocatorias.length} for page ${page}`);
+      console.log(`📊 Returning ${convocatorias.length} results for page ${page}`);
 
+      // PERFORMANCE FIX: Return approximate total and pagination info
+      // Instead of exact count, we provide enough info for "next/previous" navigation
       return {
         data: convocatorias,
-        total: totalCount,
+        total: -1, // Indicate that total count is not available
         page: page,
         pageSize: pageSize,
-        totalPages: Math.ceil(totalCount / pageSize)
+        totalPages: -1, // Indicate that total pages is not available
+        hasMore: hasMoreResults, // New field to indicate if there are more results
+        hasPrevious: page > 1 // Indicate if there's a previous page
       };
 
     } catch (error: any) {
@@ -99,17 +129,17 @@ export class BDNSLocalClient {
   async obtenerDetalleConvocatoria(id: string): Promise<ConvocatoriaData> {
     try {
       console.log(`🔍 Getting convocatoria details for ID: ${id}`);
-
-      // Search by codigo_bdns
-      const results = await this.db.searchConvocatorias(undefined, undefined, undefined, undefined, undefined, undefined, false, 1, 0);
       
-      // For now, let's implement a direct query to get by bdns_code
+      // Direct query to get by bdns_code
       const query = `
         SELECT 
+          c.id,
           c.bdns_code as codigo_bdns, 
           c.title as titulo, 
           c.title_co_official as titulo_cooficial, 
           o.name as desc_organo,
+          COALESCE(o.full_name, o.name) as desc_organo_completo,
+          o.id as organization_id,
           c.registration_date as fecha_registro, 
           c.modification_date as fecha_mod, 
           c.application_start_date as inicio_solicitud, 
@@ -126,7 +156,8 @@ export class BDNSLocalClient {
           c.legacy_finalidad as finalidad,
           c.legacy_instrumento as instrumento,
           c.legacy_sector as sector,
-          c.legacy_tipo_beneficiario as tipo_beneficiario
+          c.legacy_tipo_beneficiario as tipo_beneficiario,
+          c.legacy_region as region
         FROM convocatorias c
         JOIN organizations o ON c.organization_id = o.id
         WHERE c.bdns_code = $1 
@@ -139,6 +170,7 @@ export class BDNSLocalClient {
         throw new Error(`Convocatoria with ID ${id} not found`);
       }
 
+      console.log('Query result row:', JSON.stringify(result.rows[0], null, 2));
       return this.mapDatabaseToConvocatoria(result.rows[0]);
 
     } catch (error: any) {
@@ -202,9 +234,12 @@ export class BDNSLocalClient {
     const sector = parseJSON(row.sector, []);
 
     return {
+      id: row.id, // Add internal database ID for favorites
       identificador: row.codigo_bdns, // This is aliased in the query
       titulo: row.titulo || '', // This is aliased in the query
-      organoConvocante: row.desc_organo || '', // This is aliased in the query  
+      organoConvocante: row.desc_organo_completo || row.desc_organo || '', // Use full organization name
+      organoConvocanteCorto: row.desc_organo || '', // Keep short name as well
+      organizationId: row.organization_id, // Add organization ID for linking
       fechaPublicacion: row.fecha_registro || new Date(), // This is aliased in the query
       fechaApertura: row.inicio_solicitud || row.fecha_registro || new Date(), // This is aliased in the query
       fechaCierre: row.fin_solicitud || null, // This is aliased in the query
@@ -230,6 +265,72 @@ export class BDNSLocalClient {
       .map(tipo => tipo.descripcion || tipo.codigo)
       .filter(Boolean)
       .join(', ');
+  }
+
+  // Search grants by organization ID
+  async buscarConvocatoriasPorOrganizacion(
+    organizationId: number, 
+    params: SearchParams = {}
+  ): Promise<SearchResult<ConvocatoriaData>> {
+    try {
+      console.log(`🔍 Searching grants for organization ID: ${organizationId}`);
+      console.log('📋 Params:', params);
+
+      const startTime = Date.now();
+      
+      // Calculate pagination
+      const page = params.page || 1;
+      const pageSize = params.pageSize || 20;
+      const offset = (page - 1) * pageSize;
+
+      // Build sort clause
+      let sortClause = 'ORDER BY c.registration_date DESC';
+      if (params.sortBy && params.sortOrder) {
+        const sortFieldMap: { [key: string]: string } = {
+          'fechaPublicacion': 'c.registration_date',
+          'importeTotal': 'c.total_amount', 
+          'titulo': 'c.title'
+        };
+        
+        const dbField = sortFieldMap[params.sortBy];
+        if (dbField) {
+          sortClause = `ORDER BY ${dbField} ${params.sortOrder.toUpperCase()}`;
+        }
+      }
+
+      // PERFORMANCE FIX: Fetch one extra result to check for more pages
+      const results = await this.db.searchGrantsByOrganizationId(
+        organizationId, 
+        pageSize + 1, // Fetch one extra
+        offset, 
+        sortClause
+      );
+
+      // Check if we have more results than requested
+      const hasMoreResults = results.length > pageSize;
+      const actualResults = hasMoreResults ? results.slice(0, pageSize) : results;
+
+      // Convert database results to our ConvocatoriaData format
+      const convocatorias = actualResults.map(row => this.mapDatabaseToConvocatoria(row));
+
+      const searchTime = Date.now() - startTime;
+      console.log(`✅ Organization search completed in ${searchTime}ms`);
+      console.log(`📊 Returning ${convocatorias.length} grants for organization ${organizationId}, page ${page}`);
+
+      return {
+        data: convocatorias,
+        total: -1, // Indicate that total count is not available
+        page: page,
+        pageSize: pageSize,
+        totalPages: -1, // Indicate that total pages is not available
+        hasMore: hasMoreResults,
+        hasPrevious: page > 1
+      };
+
+    } catch (error: any) {
+      console.error(`💥 Organization grants search failed for ID ${organizationId}:`, error.message);
+      throw new Error(`Organization grants search failed: ${error.message}`);
+    }
   }
 
   // Health check for database connection

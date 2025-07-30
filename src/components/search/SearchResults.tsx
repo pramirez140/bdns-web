@@ -30,6 +30,7 @@ interface SearchResultsProps {
     query?: string;
     organismos?: string[];
     region?: string[];
+    organizationId?: string;
   };
 }
 
@@ -40,7 +41,7 @@ export default function SearchResults({
   currentSort,
   searchParams
 }: SearchResultsProps) {
-  const { data, total, page, pageSize, totalPages } = results;
+  const { data, total, page, pageSize, totalPages, hasMore, hasPrevious } = results;
   const { saveScrollPosition, saveResultItemPosition } = useSearchPersistence();
   const { exportData, isExporting, error, clearError } = useExport();
   const [showExportOptions, setShowExportOptions] = useState(false);
@@ -102,6 +103,7 @@ export default function SearchResults({
         query: searchParams?.query,
         organismos: searchParams?.organismos,
         region: searchParams?.region,
+        organizationId: searchParams?.organizationId,
         limit: exportLimit,
         format
       });
@@ -119,33 +121,23 @@ export default function SearchResults({
   };
 
   const renderPagination = () => {
-    const pages = [];
-    const maxVisiblePages = 5;
-    
-    let startPage = Math.max(1, page - Math.floor(maxVisiblePages / 2));
-    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-    
-    if (endPage - startPage + 1 < maxVisiblePages) {
-      startPage = Math.max(1, endPage - maxVisiblePages + 1);
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
+    // PERFORMANCE FIX: Simplified pagination without total count
+    const showPrevious = hasPrevious !== undefined ? hasPrevious : page > 1;
+    const showNext = hasMore !== undefined ? hasMore : true; // Default to showing next if not specified
 
     return (
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">
         <div className="flex justify-between flex-1 sm:hidden">
           <button
             onClick={() => onPageChange(page - 1)}
-            disabled={page <= 1}
+            disabled={!showPrevious}
             className="btn-outline disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Anterior
           </button>
           <button
             onClick={() => onPageChange(page + 1)}
-            disabled={page >= totalPages}
+            disabled={!showNext}
             className="btn-outline ml-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Siguiente
@@ -155,43 +147,29 @@ export default function SearchResults({
           <div>
             <p className="text-sm text-gray-700">
               Mostrando{' '}
-              <span className="font-medium">{(page - 1) * pageSize + 1}</span>
-              {' '}a{' '}
-              <span className="font-medium">
-                {Math.min(page * pageSize, total)}
-              </span>
-              {' '}de{' '}
-              <span className="font-medium">{total.toLocaleString('es-ES')}</span>
-              {' '}resultados
+              <span className="font-medium">{data.length}</span>
+              {' '}resultados - Página{' '}
+              <span className="font-medium">{page}</span>
             </p>
           </div>
           <div>
             <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
               <button
                 onClick={() => onPageChange(page - 1)}
-                disabled={page <= 1}
+                disabled={!showPrevious}
                 className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Anterior
               </button>
               
-              {pages.map((pageNum) => (
-                <button
-                  key={pageNum}
-                  onClick={() => onPageChange(pageNum)}
-                  className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                    pageNum === page
-                      ? 'z-10 bg-bdns-blue border-bdns-blue text-white'
-                      : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              ))}
+              {/* Show current page number */}
+              <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-bdns-blue text-white text-sm font-medium">
+                Página {page}
+              </span>
               
               <button
                 onClick={() => onPageChange(page + 1)}
-                disabled={page >= totalPages}
+                disabled={!showNext}
                 className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Siguiente
@@ -339,7 +317,7 @@ export default function SearchResults({
                     </h3>
                   </Link>
                   <FavoriteButton 
-                    grantId={parseInt(convocatoria.identificador)} 
+                    grantId={convocatoria.id || 0} 
                     className="ml-2 flex-shrink-0"
                     size="sm"
                   />
@@ -348,7 +326,17 @@ export default function SearchResults({
                 <div className="flex items-center space-x-4 text-sm text-gray-600 mb-3">
                   <div className="flex items-center">
                     <BuildingOfficeIcon className="h-4 w-4 mr-1" />
-                    <span>{convocatoria.organoConvocante}</span>
+                    <button
+                      onClick={() => {
+                        if (convocatoria.organizationId) {
+                          window.open(`/organizaciones/${convocatoria.organizationId}`, '_blank');
+                        }
+                      }}
+                      className="text-left hover:text-bdns-blue hover:underline transition-colors"
+                      title="Ver todas las convocatorias de esta organización"
+                    >
+                      {convocatoria.organoConvocante}
+                    </button>
                   </div>
                   <div className="flex items-center">
                     <CalendarIcon className="h-4 w-4 mr-1" />
