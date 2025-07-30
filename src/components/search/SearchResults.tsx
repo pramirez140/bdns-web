@@ -123,7 +123,10 @@ export default function SearchResults({
   const renderPagination = () => {
     // PERFORMANCE FIX: Simplified pagination without total count
     const showPrevious = hasPrevious !== undefined ? hasPrevious : page > 1;
-    const showNext = hasMore !== undefined ? hasMore : true; // Default to showing next if not specified
+    const showNext = hasMore !== undefined ? hasMore : data.length >= 20; // Show next if we have full page of results
+
+    // Don't show pagination if no results
+    if (data.length === 0) return null;
 
     return (
       <div className="flex items-center justify-between px-4 py-3 sm:px-6">

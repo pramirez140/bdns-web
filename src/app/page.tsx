@@ -73,12 +73,18 @@ function HomePage() {
 
   // Perform search with current URL state
   const performSearch = useCallback(async (filters?: SearchFilters, params?: SearchParams) => {
+    // IMPORTANT: Use the provided filters/params, not the ones from closure
     const searchFilters = filters || currentFilters;
     const searchParams = params || currentParams;
     
-    // Only search if there are actual search criteria
+    // Check if we have search parameters (pagination, sorting) which should trigger a search even with no filters
+    const hasSearchParams = searchParams.page || searchParams.sortBy || 
+        searchParams.sortOrder || searchParams.pageSize;
+    
+    // Only search if there are actual search criteria OR search parameters
     if (!searchFilters.query && !searchFilters.organoConvocante && !searchFilters.importeMinimo && 
-        !searchFilters.importeMaximo && !searchFilters.fechaConvocatoria && !searchFilters.estadoConvocatoria) {
+        !searchFilters.importeMaximo && !searchFilters.fechaConvocatoria && !searchFilters.estadoConvocatoria && 
+        !hasSearchParams) {
       return;
     }
 
@@ -88,7 +94,12 @@ function HomePage() {
     try {
       console.log('🔍 Frontend calling API with:', { searchFilters, searchParams });
       const results = await callSearchAPI(searchFilters, searchParams);
-      console.log('✅ Frontend received results:', { total: results.total, count: results.data.length });
+      console.log('✅ Frontend received results:', { 
+        total: results.total, 
+        count: results.data.length,
+        hasMore: results.hasMore,
+        hasPrevious: results.hasPrevious 
+      });
       
       setSearchResults(results);
       
@@ -105,7 +116,7 @@ function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [currentFilters, currentParams, saveSearchState]);
+  }, [saveSearchState]);
 
   // Load initial state from URL on mount with cached results
   useEffect(() => {
@@ -174,14 +185,38 @@ function HomePage() {
         }
       }
       
-      // If URL has search parameters, perform search (either no cache or cache doesn't match)
-      if (currentFilters.query || currentFilters.organoConvocante || 
+      // If URL has search parameters (filters or search params), perform search
+      const hasFilters = currentFilters.query || currentFilters.organoConvocante || 
           currentFilters.importeMinimo || currentFilters.importeMaximo ||
-          currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria) {
+          currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria;
+      
+      const hasSearchParams = currentParams.page || currentParams.sortBy || 
+          currentParams.sortOrder || currentParams.pageSize;
+      
+      if (hasFilters || hasSearchParams) {
         performSearch();
       }
     }
   }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState, restoreScrollPosition]);
+
+  // Watch for URL changes after initial load
+  useEffect(() => {
+    if (hasInitialLoad && !loading) {
+      // Only trigger search if URL state actually changed
+      const hasFilters = currentFilters.query || currentFilters.organoConvocante || 
+          currentFilters.importeMinimo || currentFilters.importeMaximo ||
+          currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria;
+      
+      const hasSearchParams = currentParams.page || currentParams.sortBy || 
+          currentParams.sortOrder || currentParams.pageSize;
+      
+      if (hasFilters || hasSearchParams) {
+        performSearch(currentFilters, currentParams);
+      }
+    }
+  }, [currentFilters.query, currentFilters.organoConvocante, currentFilters.importeMinimo, 
+      currentFilters.importeMaximo, currentParams.page, currentParams.sortBy, 
+      currentParams.sortOrder, hasInitialLoad, loading]);
 
   // Save scroll position periodically
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -209,9 +244,8 @@ function HomePage() {
   // Handle new search from form
   const handleSearch = async (query?: string, filters?: SearchFilters) => {
     const newFilters = { ...currentFilters, ...filters };
-    if (query !== undefined) {
-      newFilters.query = query;
-    }
+    // Always update query - empty string or undefined clears the search
+    newFilters.query = query || undefined;
     
     const newParams = { ...currentParams, page: 1 }; // Reset to first page
     
