@@ -73,7 +73,7 @@ function HomePage() {
 
   // Perform search with current URL state
   const performSearch = useCallback(async (filters?: SearchFilters, params?: SearchParams) => {
-    // IMPORTANT: Use the provided filters/params, not the ones from closure
+    // Use the provided filters/params, or current URL state
     const searchFilters = filters || currentFilters;
     const searchParams = params || currentParams;
     
@@ -116,7 +116,7 @@ function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [saveSearchState]);
+  }, [saveSearchState, currentFilters, currentParams]);
 
   // Load initial state from URL on mount with cached results
   useEffect(() => {
@@ -199,24 +199,8 @@ function HomePage() {
     }
   }, [hasInitialLoad, currentFilters, currentParams, performSearch, hasValidCache, searchState, restoreScrollPosition]);
 
-  // Watch for URL changes after initial load
-  useEffect(() => {
-    if (hasInitialLoad && !loading) {
-      // Only trigger search if URL state actually changed
-      const hasFilters = currentFilters.query || currentFilters.organoConvocante || 
-          currentFilters.importeMinimo || currentFilters.importeMaximo ||
-          currentFilters.fechaConvocatoria || currentFilters.estadoConvocatoria;
-      
-      const hasSearchParams = currentParams.page || currentParams.sortBy || 
-          currentParams.sortOrder || currentParams.pageSize;
-      
-      if (hasFilters || hasSearchParams) {
-        performSearch(currentFilters, currentParams);
-      }
-    }
-  }, [currentFilters.query, currentFilters.organoConvocante, currentFilters.importeMinimo, 
-      currentFilters.importeMaximo, currentParams.page, currentParams.sortBy, 
-      currentParams.sortOrder, hasInitialLoad, loading]);
+  // Watch for URL changes after initial load (removed - causing infinite loop)
+  // The search should be triggered by user actions, not by URL changes
 
   // Save scroll position periodically
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();

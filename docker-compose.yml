@@ -9,6 +9,8 @@ services:
       - NODE_ENV=production
       - BDNS_API_BASE_URL=https://www.infosubvenciones.es/bdnstrans
       - DATABASE_URL=postgresql://bdns_user:bdns_password@postgres:5432/bdns_db
+      - NEXTAUTH_SECRET=your-secret-key-here-replace-in-production
+      - NEXTAUTH_URL=http://localhost:3000
     volumes:
       - ./data:/app/data
       # Development: mount source code for hot reload (comment out for production)
