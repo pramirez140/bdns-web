@@ -204,7 +204,8 @@ export default function SearchResults({
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <h2 className="text-lg font-medium text-gray-900">
-              {total.toLocaleString('es-ES')} convocatorias encontradas
+              {total > 0 ? `${total.toLocaleString('es-ES')} convocatorias encontradas` : 
+               data.length > 0 ? 'Resultados de búsqueda' : 'No se encontraron resultados'}
             </h2>
             <p className="text-xs text-gray-500 mt-1">
               * La fecha mostrada es el registro en BDNS. Para fechas de cierre, consulta el portal oficial de cada convocatoria.

@@ -342,27 +342,171 @@ export class BDNSDatabase {
     offset: number = 0,
     sortClause: string = 'ORDER BY fecha_registro DESC'
   ): Promise<any[]> {
-    // Expand organism names if it's an array of normalized names
-    let expandedOrganoFilters: string[] | undefined;
-    if (Array.isArray(organoFilter) && organoFilter.length > 0) {
-      // Only expand if it looks like normalized organism names
-      const hasNormalizedNames = organoFilter.some(org => 
-        org.startsWith('ESTADO - MINISTERIO') || 
-        org.match(/^[A-Z\s]+ - [A-Z]/) // Pattern like "ANDALUCÍA - XXXX"
-      );
-      
-      if (hasNormalizedNames) {
-        expandedOrganoFilters = await this.expandOrganismNames(organoFilter);
+    // Extract sort parameters from sortClause
+    let sortBy = 'fecha_publicacion';
+    let sortOrder = 'DESC';
+    
+    const sortMatch = sortClause.match(/ORDER BY c\.(\w+) (ASC|DESC)/i);
+    if (sortMatch) {
+      const fieldMap: { [key: string]: string } = {
+        'registration_date': 'fecha_publicacion',
+        'total_amount': 'importe',
+        'title': 'titulo',
+        'application_start_date': 'fecha_inicio_solicitud',
+        'application_end_date': 'fecha_fin_solicitud'
+      };
+      sortBy = fieldMap[sortMatch[1]] || 'fecha_publicacion';
+      sortOrder = sortMatch[2];
+    }
+
+    // Convert organization filter to array for the stored function
+    let organizationIds: string[] | null = null;
+    if (organoFilter) {
+      if (Array.isArray(organoFilter)) {
+        organizationIds = organoFilter;
+      } else {
+        organizationIds = [organoFilter];
       }
     }
-    
-    // Build the main query with filtering and sorting
-    let query = `
+
+    // Call the improved stored function with cross-field search
+    const query = `
+      SELECT * FROM search_convocatorias(
+        $1::text,  -- search_term
+        NULL,      -- tipo (not used)
+        $2::numeric, -- importe_min
+        $3::numeric, -- importe_max
+        $4::date,  -- fecha_inicio
+        $5::date,  -- fecha_fin
+        NULL,      -- codigo_tematico (not used)
+        NULL,      -- desc_instrumento (not used)
+        $6::text[], -- organization_ids
+        $7::integer, -- limit_rows
+        $8::integer, -- offset_rows
+        $9::text,  -- sort_by
+        $10::text  -- sort_order
+      )
+    `;
+
+    const values = [
+      searchTerm || null,
+      importeMin || null,
+      importeMax || null,
+      fechaDesde || null,
+      fechaHasta || null,
+      organizationIds,
+      limit,
+      offset,
+      sortBy,
+      sortOrder
+    ];
+
+    // PERFORMANCE FIX: Use direct query instead of stored function
+    // Build query dynamically for better parameter handling
+    let directQuery = `
+      SELECT 
+        c.id,
+        c.bdns_code as codigo_bdns,
+        c.title as titulo,
+        c.title_co_official as titulo_cooficial,
+        o.name as desc_organo,
+        o.full_name as desc_organo_completo,
+        o.id as organization_id,
+        c.registration_date as fecha_registro,
+        c.modification_date as fecha_mod,
+        c.application_start_date as inicio_solicitud,
+        c.application_end_date as fin_solicitud,
+        c.is_open as abierto,
+        c.total_amount as importe_total,
+        c.max_beneficiary_amount as importe_maximo_beneficiario,
+        c.description_br,
+        c.url_esp_br,
+        c.eu_fund as fondo_ue,
+        c.permalink_grant as permalink_convocatoria,
+        c.permalink_awards as permalink_concesiones,
+        c.legacy_financiacion as financiacion,
+        c.legacy_finalidad as finalidad,
+        c.legacy_instrumento as instrumento,
+        c.legacy_sector as sector,
+        c.legacy_tipo_beneficiario as tipo_beneficiario,
+        c.legacy_region as region
+      FROM convocatorias c
+      JOIN organizations o ON c.organization_id = o.id
+      WHERE 1=1
+    `;
+
+    const directValues: any[] = [];
+    let directParamIndex = 1;
+
+    // Add search term condition
+    if (searchTerm) {
+      directQuery += ` AND c.title ILIKE $${directParamIndex}`;
+      directValues.push(`%${searchTerm}%`);
+      directParamIndex++;
+    }
+
+    // Add organization filter
+    if (organizationIds && organizationIds.length > 0) {
+      directQuery += ` AND o.name = ANY($${directParamIndex}::text[])`;
+      directValues.push(organizationIds);
+      directParamIndex++;
+    }
+
+    // Add date filters
+    if (fechaDesde) {
+      directQuery += ` AND c.registration_date >= $${directParamIndex}`;
+      directValues.push(fechaDesde);
+      directParamIndex++;
+    }
+    if (fechaHasta) {
+      directQuery += ` AND c.registration_date <= $${directParamIndex}`;
+      directValues.push(fechaHasta);
+      directParamIndex++;
+    }
+
+    // Add amount filters
+    if (importeMin) {
+      directQuery += ` AND c.total_amount >= $${directParamIndex}`;
+      directValues.push(importeMin);
+      directParamIndex++;
+    }
+    if (importeMax) {
+      directQuery += ` AND c.total_amount <= $${directParamIndex}`;
+      directValues.push(importeMax);
+      directParamIndex++;
+    }
+
+    // Add open status filter
+    if (soloAbiertas) {
+      directQuery += ` AND c.is_open = true`;
+    }
+
+    // Add sorting
+    directQuery += ` ${sortClause}`;
+
+    // Add pagination
+    directQuery += ` LIMIT $${directParamIndex} OFFSET $${directParamIndex + 1}`;
+    directValues.push(limit, offset);
+
+    const result = await this.db.query(directQuery, directValues);
+    return result.rows;
+  }
+
+  // Search grants by organization ID
+  async searchGrantsByOrganizationId(
+    organizationId: number,
+    limit: number = 20,
+    offset: number = 0,
+    sortClause: string = 'ORDER BY c.registration_date DESC'
+  ): Promise<any[]> {
+    const query = `
       SELECT 
         c.bdns_code as codigo_bdns, 
         c.title as titulo, 
         c.title_co_official as titulo_cooficial, 
         o.name as desc_organo,
+        COALESCE(o.full_name, o.name) as desc_organo_completo,
+        o.id as organization_id,
         c.registration_date as fecha_registro, 
         c.modification_date as fecha_mod, 
         c.application_start_date as inicio_solicitud, 
@@ -380,83 +524,28 @@ export class BDNSDatabase {
         c.last_synced_at
       FROM convocatorias c
       JOIN organizations o ON c.organization_id = o.id
-      WHERE 1=1
+      WHERE c.organization_id = $1
+      ${sortClause}
+      LIMIT $2 OFFSET $3
     `;
     
-    const values: any[] = [];
-    let paramIndex = 1;
-
-    // Add search conditions
-    if (searchTerm) {
-      query += ` AND (
-        c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
-        c.title ILIKE '%' || $${paramIndex} || '%' OR
-        o.name ILIKE '%' || $${paramIndex} || '%'
-      )`;
-      values.push(searchTerm);
-      paramIndex++;
-    }
-
-    if (organoFilter) {
-      if (Array.isArray(organoFilter) && organoFilter.length > 0) {
-        if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
-          // Use exact matches for expanded organisms
-          const organoConditions = expandedOrganoFilters.map((_, index) => `o.name = $${paramIndex + index}`);
-          query += ` AND (${organoConditions.join(' OR ')})`;
-          expandedOrganoFilters.forEach(organo => values.push(organo));
-          paramIndex += expandedOrganoFilters.length;
-        } else {
-          // For simple array terms, use ILIKE
-          const organoConditions = organoFilter.map((_, index) => `o.name ILIKE $${paramIndex + index}`);
-          query += ` AND (${organoConditions.join(' OR ')})`;
-          organoFilter.forEach(organo => values.push(`%${organo}%`));
-          paramIndex += organoFilter.length;
-        }
-      } else if (typeof organoFilter === 'string') {
-        query += ` AND o.name ILIKE '%' || $${paramIndex} || '%'`;
-        values.push(organoFilter);
-        paramIndex++;
-      }
-    }
-
-    if (fechaDesde) {
-      query += ` AND c.registration_date >= $${paramIndex}`;
-      values.push(fechaDesde);
-      paramIndex++;
-    }
-
-    if (fechaHasta) {
-      query += ` AND c.registration_date <= $${paramIndex}`;
-      values.push(fechaHasta);
-      paramIndex++;
-    }
-
-    if (importeMin) {
-      query += ` AND c.total_amount >= $${paramIndex}`;
-      values.push(importeMin);
-      paramIndex++;
-    }
-
-    if (importeMax) {
-      query += ` AND c.total_amount <= $${paramIndex}`;
-      values.push(importeMax);
-      paramIndex++;
-    }
-
-    if (soloAbiertas) {
-      query += ` AND c.is_open = true`;
-    }
-
-    // Add sorting and pagination
-    query += ` ${sortClause}`;
-    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    values.push(limit, offset);
-
-    const result = await this.db.query(query, values);
+    const result = await this.db.query(query, [organizationId, limit, offset]);
     return result.rows;
   }
 
-  // Get total count for search
+  // Get total count for organization grants
+  async getOrganizationGrantsCount(organizationId: number): Promise<number> {
+    const query = `
+      SELECT COUNT(*) as total
+      FROM convocatorias c
+      WHERE c.organization_id = $1
+    `;
+    
+    const result = await this.db.query(query, [organizationId]);
+    return parseInt(result.rows[0].total);
+  }
+
+  // Get total count for search - now using the improved stored function
   async getSearchCount(
     searchTerm?: string,
     organoFilter?: string | string[],
@@ -466,91 +555,46 @@ export class BDNSDatabase {
     importeMax?: number,
     soloAbiertas?: boolean
   ): Promise<number> {
-    // Expand organism names if it's an array of normalized names
-    let expandedOrganoFilters: string[] | undefined;
-    if (Array.isArray(organoFilter) && organoFilter.length > 0) {
-      // Only expand if it looks like normalized organism names
-      const hasNormalizedNames = organoFilter.some(org => 
-        org.startsWith('ESTADO - MINISTERIO') || 
-        org.match(/^[A-Z\s]+ - [A-Z]/) // Pattern like "ANDALUCÍA - XXXX"
-      );
-      
-      if (hasNormalizedNames) {
-        expandedOrganoFilters = await this.expandOrganismNames(organoFilter);
-      }
-    }
-    let query = `
-      SELECT COUNT(*) as total
-      FROM convocatorias c
-      JOIN organizations o ON c.organization_id = o.id
-      WHERE 1=1
-    `;
-    
-    const values: any[] = [];
-    let paramIndex = 1;
-
-    if (searchTerm) {
-      query += ` AND (
-        c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
-        c.title ILIKE '%' || $${paramIndex} || '%' OR
-        o.name ILIKE '%' || $${paramIndex} || '%'
-      )`;
-      values.push(searchTerm);
-      paramIndex++;
-    }
-
+    // Convert organization filter to array for the stored function
+    let organizationIds: string[] | null = null;
     if (organoFilter) {
-      if (Array.isArray(organoFilter) && organoFilter.length > 0) {
-        if (expandedOrganoFilters && expandedOrganoFilters.length > 0) {
-          // Use exact matches for expanded organisms
-          const organoConditions = expandedOrganoFilters.map((_, index) => `o.name = $${paramIndex + index}`);
-          query += ` AND (${organoConditions.join(' OR ')})`;
-          expandedOrganoFilters.forEach(organo => values.push(organo));
-          paramIndex += expandedOrganoFilters.length;
-        } else {
-          // For simple array terms, use ILIKE
-          const organoConditions = organoFilter.map((_, index) => `o.name ILIKE $${paramIndex + index}`);
-          query += ` AND (${organoConditions.join(' OR ')})`;
-          organoFilter.forEach(organo => values.push(`%${organo}%`));
-          paramIndex += organoFilter.length;
-        }
-      } else if (typeof organoFilter === 'string') {
-        query += ` AND o.name ILIKE '%' || $${paramIndex} || '%'`;
-        values.push(organoFilter);
-        paramIndex++;
+      if (Array.isArray(organoFilter)) {
+        organizationIds = organoFilter;
+      } else {
+        organizationIds = [organoFilter];
       }
     }
 
-    if (fechaDesde) {
-      query += ` AND c.registration_date >= $${paramIndex}`;
-      values.push(fechaDesde);
-      paramIndex++;
-    }
+    // Call the stored function to get the total count
+    const query = `
+      SELECT total_count FROM search_convocatorias(
+        $1::text,  -- search_term
+        NULL,      -- tipo (not used)
+        $2::numeric, -- importe_min
+        $3::numeric, -- importe_max
+        $4::date,  -- fecha_inicio
+        $5::date,  -- fecha_fin
+        NULL,      -- codigo_tematico (not used)
+        NULL,      -- desc_instrumento (not used)
+        $6::text[], -- organization_ids
+        1,         -- limit_rows (just need 1 row for count)
+        0,         -- offset_rows
+        'fecha_publicacion', -- sort_by (doesn't matter for count)
+        'DESC'     -- sort_order (doesn't matter for count)
+      ) LIMIT 1
+    `;
 
-    if (fechaHasta) {
-      query += ` AND c.registration_date <= $${paramIndex}`;
-      values.push(fechaHasta);
-      paramIndex++;
-    }
-
-    if (importeMin) {
-      query += ` AND c.total_amount >= $${paramIndex}`;
-      values.push(importeMin);
-      paramIndex++;
-    }
-
-    if (importeMax) {
-      query += ` AND c.total_amount <= $${paramIndex}`;
-      values.push(importeMax);
-      paramIndex++;
-    }
-
-    if (soloAbiertas) {
-      query += ` AND c.is_open = true`;
-    }
+    const values = [
+      searchTerm || null,
+      importeMin || null,
+      importeMax || null,
+      fechaDesde || null,
+      fechaHasta || null,
+      organizationIds
+    ];
 
     const result = await this.db.query(query, values);
-    return parseInt(result.rows[0].total);
+    return result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
   }
 
   // Get sync statistics (with real-time data)
@@ -670,6 +714,211 @@ export class BDNSDatabase {
       return total + (isNaN(importe) ? 0 : importe);
     }, 0);
   }
+
+  // Get all descendant organization IDs for hierarchical filtering
+  async getOrganizationDescendants(organizationIds: number[]): Promise<number[]> {
+    if (!organizationIds || organizationIds.length === 0) {
+      return [];
+    }
+
+    const query = `
+      WITH RECURSIVE org_tree AS (
+        -- Start with the selected organizations
+        SELECT id FROM organizations WHERE id = ANY($1::integer[])
+        
+        UNION ALL
+        
+        -- Recursively find all children
+        SELECT o.id 
+        FROM organizations o
+        JOIN org_tree ot ON o.parent_id = ot.id
+      )
+      SELECT array_agg(DISTINCT id) as all_ids FROM org_tree
+    `;
+
+    const result = await this.db.query(query, [organizationIds]);
+    return result.rows[0]?.all_ids || organizationIds;
+  }
+
+  // Enhanced search with hierarchical organization support
+  async searchConvocatoriasHierarchical(
+    searchTerm?: string,
+    organizationIds?: number[],
+    fechaDesde?: Date,
+    fechaHasta?: Date,
+    importeMin?: number,
+    importeMax?: number,
+    soloAbiertas?: boolean,
+    limit: number = 20,
+    offset: number = 0,
+    sortClause: string = 'ORDER BY c.registration_date DESC'
+  ): Promise<any[]> {
+    // Build the main query
+    let query = `
+      SELECT 
+        c.bdns_code as codigo_bdns, 
+        c.title as titulo, 
+        c.title_co_official as titulo_cooficial, 
+        o.name as desc_organo,
+        o.full_name as org_full_name,
+        o.id as organization_id,
+        c.registration_date as fecha_registro, 
+        c.modification_date as fecha_mod, 
+        c.application_start_date as inicio_solicitud, 
+        c.application_end_date as fin_solicitud,
+        c.is_open as abierto, 
+        c.total_amount as importe_total,
+        c.max_beneficiary_amount as importe_maximo_beneficiario,
+        c.description_br, 
+        c.url_esp_br, 
+        c.eu_fund as fondo_ue,
+        c.permalink_grant as permalink_convocatoria, 
+        c.permalink_awards as permalink_concesiones,
+        c.created_at, 
+        c.updated_at, 
+        c.last_synced_at
+      FROM convocatorias c
+      JOIN organizations o ON c.organization_id = o.id
+      WHERE 1=1
+    `;
+    
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    // Add search conditions
+    if (searchTerm) {
+      query += ` AND (
+        c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
+        c.title ILIKE '%' || $${paramIndex} || '%' OR
+        o.name ILIKE '%' || $${paramIndex} || '%' OR
+        o.full_name ILIKE '%' || $${paramIndex} || '%'
+      )`;
+      values.push(searchTerm);
+      paramIndex++;
+    }
+
+    // Handle organization filtering with hierarchy
+    if (organizationIds && organizationIds.length > 0) {
+      // Get all descendant organizations
+      const allOrgIds = await this.getOrganizationDescendants(organizationIds);
+      
+      query += ` AND c.organization_id = ANY($${paramIndex}::integer[])`;
+      values.push(allOrgIds);
+      paramIndex++;
+    }
+
+    if (fechaDesde) {
+      query += ` AND c.registration_date >= $${paramIndex}`;
+      values.push(fechaDesde);
+      paramIndex++;
+    }
+
+    if (fechaHasta) {
+      query += ` AND c.registration_date <= $${paramIndex}`;
+      values.push(fechaHasta);
+      paramIndex++;
+    }
+
+    if (importeMin) {
+      query += ` AND c.total_amount >= $${paramIndex}`;
+      values.push(importeMin);
+      paramIndex++;
+    }
+
+    if (importeMax) {
+      query += ` AND c.total_amount <= $${paramIndex}`;
+      values.push(importeMax);
+      paramIndex++;
+    }
+
+    if (soloAbiertas) {
+      query += ` AND c.is_open = true`;
+    }
+
+    // Add sorting and pagination
+    query += ` ${sortClause}`;
+    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    values.push(limit, offset);
+
+    const result = await this.db.query(query, values);
+    return result.rows;
+  }
+
+  // Get search count with hierarchical organization support
+  async getSearchCountHierarchical(
+    searchTerm?: string,
+    organizationIds?: number[],
+    fechaDesde?: Date,
+    fechaHasta?: Date,
+    importeMin?: number,
+    importeMax?: number,
+    soloAbiertas?: boolean
+  ): Promise<number> {
+    let query = `
+      SELECT COUNT(*) as total
+      FROM convocatorias c
+      JOIN organizations o ON c.organization_id = o.id
+      WHERE 1=1
+    `;
+    
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (searchTerm) {
+      query += ` AND (
+        c.search_vector @@ plainto_tsquery('spanish', $${paramIndex}) OR
+        c.title ILIKE '%' || $${paramIndex} || '%' OR
+        o.name ILIKE '%' || $${paramIndex} || '%' OR
+        o.full_name ILIKE '%' || $${paramIndex} || '%'
+      )`;
+      values.push(searchTerm);
+      paramIndex++;
+    }
+
+    // Handle organization filtering with hierarchy
+    if (organizationIds && organizationIds.length > 0) {
+      // Get all descendant organizations
+      const allOrgIds = await this.getOrganizationDescendants(organizationIds);
+      
+      query += ` AND c.organization_id = ANY($${paramIndex}::integer[])`;
+      values.push(allOrgIds);
+      paramIndex++;
+    }
+
+    if (fechaDesde) {
+      query += ` AND c.registration_date >= $${paramIndex}`;
+      values.push(fechaDesde);
+      paramIndex++;
+    }
+
+    if (fechaHasta) {
+      query += ` AND c.registration_date <= $${paramIndex}`;
+      values.push(fechaHasta);
+      paramIndex++;
+    }
+
+    if (importeMin) {
+      query += ` AND c.total_amount >= $${paramIndex}`;
+      values.push(importeMin);
+      paramIndex++;
+    }
+
+    if (importeMax) {
+      query += ` AND c.total_amount <= $${paramIndex}`;
+      values.push(importeMax);
+      paramIndex++;
+    }
+
+    if (soloAbiertas) {
+      query += ` AND c.is_open = true`;
+    }
+
+    const result = await this.db.query(query, values);
+    return parseInt(result.rows[0].total);
+  }
 }
 
 export default Database;
+
+// Export the pool instance for direct access
+export { pool };
